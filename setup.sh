@@ -4,19 +4,17 @@ set -Eeuo pipefail
 # FaceOcc bootstrap for Linux.
 # - installs a repo-local micromamba binary and root prefix
 # - creates the environment from environment.yml
-# - downloads FaceOcc.zip from the project Google Drive link
-# - downloads the official CelebAMask-HQ.zip dataset
+# - loads local setup configuration from .env (without executing it as shell code)
+# - downloads FaceOcc.zip and CelebAMask-HQ.zip from configured Google Drive URLs
 # - extracts datasets into deterministic locations
 #
 # Usage:
-#   ./setup.sh --accept-celebamask-license
-#
-# Optional:
-#   KEEP_ARCHIVES=1 ./setup.sh --accept-celebamask-license
+#   cp .env.example .env
+#   # Edit .env, review the CelebAMask-HQ license, then set
+#   # CELEBAMASK_LICENSE_ACCEPTED=1 if you accept it.
+#   ./setup.sh
 
-FACEOCC_GDRIVE_ID="1QT5chE079Cm0oBf4Oz1gF0DuXEwNfYUP"
 FACEOCC_ARCHIVE_SIZE="538014369"
-CELEBAMASK_GDRIVE_ID="1badu11NqxGf6qM3PTTooQDJvQbejgbTv"
 CELEBAMASK_ARCHIVE_SIZE="3153930546"
 GDOWN_VERSION="5.2.0"
 ENV_NAME="faceocc"
@@ -38,33 +36,79 @@ log()  { printf '\n[FaceOcc setup] %s\n' "$*"; }
 die()  { printf '\n[FaceOcc setup] ERROR: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
 
-ACCEPT_LICENSE=0
-for arg in "$@"; do
-    case "$arg" in
-        --accept-celebamask-license) ACCEPT_LICENSE=1 ;;
-        -h|--help)
-            cat <<'USAGE'
-Usage: ./setup.sh --accept-celebamask-license
+usage() {
+    cat <<'USAGE'
+Usage: ./setup.sh
 
-Downloads:
-  - FaceOcc.zip supplied by the FaceOcc project
-  - Official CelebAMask-HQ.zip
+Configuration is read from .env in the repository root. Start with:
+  cp .env.example .env
+
+Required .env values:
+  FACEOCC_GDRIVE_URL=...
+  CELEBAMASK_GDRIVE_URL=...
+  CELEBAMASK_LICENSE_ACCEPTED=1
+
+Optional:
+  KEEP_ARCHIVES=1
 
 CelebAMask-HQ is restricted to non-commercial research/educational use by
-its upstream dataset agreement. The setup intentionally refuses to download
-it until --accept-celebamask-license is supplied.
-
-Environment variables:
-  KEEP_ARCHIVES=1   Keep downloaded ZIP files after successful extraction.
+its upstream dataset agreement. Set CELEBAMASK_LICENSE_ACCEPTED=1 only after
+reviewing and accepting that agreement.
 USAGE
-            exit 0
-            ;;
-        *) die "Unknown argument: $arg" ;;
-    esac
-done
+}
 
-[[ "$ACCEPT_LICENSE" -eq 1 ]] || die \
-    "CelebAMask-HQ license not accepted. Review the upstream dataset agreement, then rerun with --accept-celebamask-license."
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+fi
+[[ "$#" -eq 0 ]] || die "setup.sh takes no arguments; configure it through .env (use --help for details)."
+
+trim_env_value() {
+    local value="$1"
+    value="${value%$'\r'}"
+    # Strip matching single or double quotes without eval/source.
+    if [[ ${#value} -ge 2 ]]; then
+        if [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]] || \
+           [[ "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+            value="${value:1:${#value}-2}"
+        fi
+    fi
+    printf '%s' "$value"
+}
+
+load_env_file() {
+    local env_file="$REPO_ROOT/.env"
+    [[ -f "$env_file" ]] || die \
+        ".env not found. Run 'cp .env.example .env', edit it, then rerun setup.sh."
+
+    local line key value line_no=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        ((line_no += 1))
+        line="${line%$'\r'}"
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" == *=* ]] || die "Invalid .env entry at line $line_no: expected KEY=VALUE."
+
+        key="${line%%=*}"
+        value="${line#*=}"
+        key="${key//[[:space:]]/}"
+        value="$(trim_env_value "$value")"
+
+        case "$key" in
+            FACEOCC_GDRIVE_URL) FACEOCC_GDRIVE_URL="$value" ;;
+            CELEBAMASK_GDRIVE_URL) CELEBAMASK_GDRIVE_URL="$value" ;;
+            CELEBAMASK_LICENSE_ACCEPTED) CELEBAMASK_LICENSE_ACCEPTED="$value" ;;
+            KEEP_ARCHIVES) KEEP_ARCHIVES="$value" ;;
+            *) die "Unknown .env key '$key' at line $line_no." ;;
+        esac
+    done < "$env_file"
+}
+
+load_env_file
+
+[[ -n "${FACEOCC_GDRIVE_URL:-}" ]] || die "FACEOCC_GDRIVE_URL is empty in .env."
+[[ -n "${CELEBAMASK_GDRIVE_URL:-}" ]] || die "CELEBAMASK_GDRIVE_URL is empty in .env."
+[[ "${CELEBAMASK_LICENSE_ACCEPTED:-0}" == "1" ]] || die \
+    "CelebAMask-HQ license not accepted. Review it, then set CELEBAMASK_LICENSE_ACCEPTED=1 in .env."
 
 [[ -f "$REPO_ROOT/environment.yml" ]] || die "environment.yml not found in repo root: $REPO_ROOT"
 [[ -f "$REPO_ROOT/requirements.txt" ]] || die "requirements.txt not found in repo root: $REPO_ROOT"
@@ -127,7 +171,7 @@ create_environment() {
 }
 
 download_gdrive() {
-    local file_id="$1"
+    local url="$1"
     local output="$2"
     local expected_size="$3"
     local label="$4"
@@ -151,7 +195,7 @@ download_gdrive() {
 
     log "Downloading $label"
     "$MICROMAMBA" run -n "$ENV_NAME" python -m gdown \
-        --continue --fuzzy "https://drive.google.com/file/d/${file_id}/view" \
+        --continue --fuzzy "$url" \
         -O "$output"
 
     local actual_size
@@ -271,7 +315,7 @@ main() {
         log "FaceOcc dataset already present; skipping its download"
     else
         download_gdrive \
-            "$FACEOCC_GDRIVE_ID" \
+            "$FACEOCC_GDRIVE_URL" \
             "$DOWNLOAD_DIR/FaceOcc.zip" \
             "$FACEOCC_ARCHIVE_SIZE" \
             "FaceOcc.zip"
@@ -282,7 +326,7 @@ main() {
         log "CelebAMask-HQ already present; skipping its download"
     else
         download_gdrive \
-            "$CELEBAMASK_GDRIVE_ID" \
+            "$CELEBAMASK_GDRIVE_URL" \
             "$DOWNLOAD_DIR/CelebAMask-HQ.zip" \
             "$CELEBAMASK_ARCHIVE_SIZE" \
             "CelebAMask-HQ.zip"

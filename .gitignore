@@ -1,0 +1,26 @@
+# Local configuration
+.env
+
+# Repo-local Micromamba installation, environments, and caches
+.tools/
+.micromamba/
+.cache/
+
+# Downloaded/raw datasets and generated training-ready datasets
+/data/
+/Dataset/FaceOcc/
+/Dataset/CelebA-HQ-align/
+/Dataset/CelebAMask-HQ-align/
+
+# Model/checkpoint artifacts
+/pretrained/*.safetensors
+/pretrained/*.ckpt
+/pretrained/*.pth
+/pretrained/*.pt
+
+# Runtime logs
+*.log
+
+# Python-generated files
+__pycache__/
+*.py[cod]
