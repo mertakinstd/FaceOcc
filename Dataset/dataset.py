@@ -158,8 +158,10 @@ class COFW_test(Data.Dataset):
 
 
 class InputFetcher(object):
-    def __init__(self, batch_size=8, name='celeba', device='cuda:0'):
-        self.device = device
+    def __init__(self, batch_size=8, name='celeba', device=None):
+        if device is None:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device(device)
         if name == 'train':
             self.dataset = FaceMask()
         elif name == 'test':

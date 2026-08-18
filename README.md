@@ -7,11 +7,15 @@ Our paper is accepted by [TAIMA 2022](http://www.arts-pi.org.tn/TAIMA2020/)
 > Occlusions often occur in face images in the wild, troubling face-related tasks such as landmark detection, 3D reconstruction, and face recognition. It is beneficial to extract face regions from unconstrained face images accurately. However, current face segmentation datasets suffer from small data volumes, few occlusion types, low resolution, and imprecise annotation, limiting the performance of data-driven-based algorithms. This paper proposes a novel face occlusion dataset with manually labeled face occlusions from the CelebA-HQ and the internet. The occlusion types cover sunglasses, spectacles, hands, masks, scarfs, microphones, etc. To the best of our knowledge, it is by far the largest and most comprehensive face occlusion dataset. Combining it with the attribute mask in CelebAMask-HQ, we trained a straightforward face segmentation model but obtained SOTA performance, convincingly demonstrating the effectiveness of the proposed dataset. 
 
 # Requirements
-* PyTorch > 1.6.0
-* [Segmentation Models](https://github.com/qubvel/segmentation_models.pytorch)
-* PIL
-* cv2
-* numpy 
+The reproducible environment is defined by `environment.yml` and `requirements.txt`.
+It uses Micromamba/Conda to pin Python, PyTorch, torchvision, the CUDA runtime, and the numeric stack; pip is only used for the packages listed in `requirements.txt`.
+
+```bash
+micromamba create -f environment.yml
+micromamba activate faceocc
+```
+
+The code automatically uses CUDA when available and otherwise falls back to CPU. If more than one CUDA device is visible, training uses `nn.DataParallel`; use `CUDA_VISIBLE_DEVICES` to control which GPUs are exposed to the process.
 
 # How to use 
 1. Download CelebAMask-HQ dataset, detect the facial landmarks using [3DDFAv2](https://github.com/cleardusk/3DDFA_V2)

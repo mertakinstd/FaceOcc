@@ -1,6 +1,7 @@
 import segmentation_models_pytorch as smp
 import torch
 from torch import nn
+from safetensors.torch import save_file
 from torch.utils.data import DataLoader
 from Dataset.dataset import FaceMask, COFW_test
 from loss import OhemBCELoss, DiceLoss, IoU, Precision
@@ -23,7 +24,10 @@ ENCODER_WEIGHTS = 'imagenet'
 CLASSES = 1
 ATTENTION = None
 ACTIVATION = None
-DEVICE = 'cuda:0'
+if not torch.cuda.is_available():
+    raise RuntimeError('CUDA is required for FaceOcc training; CPU training is intentionally unsupported.')
+
+DEVICE = torch.device('cuda')
 
 model = smp.Unet(encoder_name=ENCODER,
                  encoder_weights=ENCODER_WEIGHTS,
@@ -31,7 +35,12 @@ model = smp.Unet(encoder_name=ENCODER,
                  classes=CLASSES,
                  activation=ACTIVATION)
 
-model = nn.DataParallel(model.to(DEVICE), device_ids=[0, 1])
+model = model.to(DEVICE)
+if torch.cuda.device_count() > 1:
+    model = nn.DataParallel(model)
+    print(f'Using {torch.cuda.device_count()} CUDA devices via DataParallel')
+else:
+    print(f'Using CUDA device 0: {torch.cuda.get_device_name(0)}')
 # state_dict = torch.load('pretrained/epoch_26_best.ckpt')
 # model.load_state_dict(state_dict)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -75,23 +84,27 @@ for epoch in range(1, epochs+1):
     if max_score < valid_logs['iou_score']:
         print('best model')
         max_score = valid_logs['iou_score']
-        model_name = f'epoch_{epoch}_best.ckpt'
+        model_name = f'epoch_{epoch}_best.safetensors'
         for name in os.listdir(model_root):
-            if 'best' in name:
+            if name.endswith('.safetensors') and 'best' in name:
                 to_rename = os.path.join(model_root, name)
-                new_name = '_'.join(name.split('_')[:2])+'.ckpt'
+                new_name = '_'.join(name.split('_')[:2])+'.safetensors'
                 new_name = os.path.join(model_root, new_name)
                 os.rename(to_rename, new_name)
 
     else:
-        model_name = f'epoch_{epoch}.ckpt'
+        model_name = f'epoch_{epoch}.safetensors'
 
-    state_dict = model.state_dict()
+    model_to_save = model.module if isinstance(model, nn.DataParallel) else model
+    state_dict = {
+        name: tensor.detach().cpu().contiguous()
+        for name, tensor in model_to_save.state_dict().items()
+    }
     model_pth = os.path.join(model_root, model_name)
-    torch.save(state_dict, model_pth)
+    save_file(state_dict, model_pth, metadata={'format': 'pt'})
     print(f'Epoch: {epoch}, model saved')
     for name in os.listdir(model_root):
-        if ('best' not in name) and (name != model_name):
+        if name.endswith('.safetensors') and ('best' not in name) and (name != model_name):
             to_remove = os.path.join(model_root, name)
             os.remove(to_remove)
 

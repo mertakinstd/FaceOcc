@@ -7,15 +7,16 @@ import cv2
 from Dataset.utils import tensor2img
 from PIL import Image
 import os
-from collections import OrderedDict
 import tqdm
+import time
+from safetensors.torch import load_file
 
 ENCODER = 'resnet18'
 ENCODER_WEIGHTS = 'imagenet'
 CLASSES = 1
 ATTENTION = None
 ACTIVATION = None
-DEVICE = 'cuda:1'
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 root = './Dataset/FaceOcc/COFW_test/img'
 root_mask = './Dataset/FaceOcc/COFW_test/mask'
 to_tensor = TF.ToTensor()
@@ -24,14 +25,9 @@ model = smp.Unet(encoder_name=ENCODER,
                  classes=CLASSES,
                  activation=ACTIVATION)
 
-# model = nn.DataParallel(model.to(DEVICE), device_ids=[0, 1])
-weights = torch.load('../prepare_de_occ_mask/pretrained_bce_dice/epoch_16_best.ckpt')
-new_weights = OrderedDict()
-for key in weights.keys():
-    new_key = '.'.join(key.split('.')[1:])
-    new_weights[new_key] = weights[key]
-
-model.load_state_dict(new_weights)
+weights_path = os.environ.get('FACEOCC_WEIGHTS', './pretrained/epoch_16_best.safetensors')
+weights = load_file(weights_path, device='cpu')
+model.load_state_dict(weights)
 model.to(DEVICE)
 model.eval()
 img_lst = os.listdir(root)
@@ -86,7 +82,7 @@ def get_refine(name):
     I = cv2.resize(I, (256, 256))
     mask = I[..., 3] > 200
     mask = torch.from_numpy(mask.astype('float32')).unsqueeze(0).unsqueeze(0)
-    mask = mask.cuda()
+    mask = mask.to(DEVICE)
     return mask
 
 
@@ -119,27 +115,33 @@ print('recall={}'.format(total_recall / len(img_lst)))
 # FPS evaluation
 dummy_input = torch.rand(1, 3, 256, 256).to(DEVICE)
 repetitions = 1000
-timings = np.zeros((repetitions, 1))
-starter = torch.cuda.Event(enable_timing=True)
-ender = torch.cuda.Event(enable_timing=True)
 
 # warm up
 with torch.no_grad():
     for _ in range(100):
         _ = model(dummy_input)
 
-torch.cuda.synchronize()
+if DEVICE.type == 'cuda':
+    timings = np.zeros((repetitions, 1))
+    starter = torch.cuda.Event(enable_timing=True)
+    ender = torch.cuda.Event(enable_timing=True)
+    torch.cuda.synchronize()
 
-# test
-with torch.no_grad():
-    for rep in tqdm.tqdm(range(repetitions)):
-        starter.record()
-        _ = model(dummy_input)
-        ender.record()
-        torch.cuda.synchronize()
-        curr_time = starter.elapsed_time(ender)
-        timings[rep] = curr_time
+    with torch.no_grad():
+        for rep in tqdm.tqdm(range(repetitions)):
+            starter.record()
+            _ = model(dummy_input)
+            ender.record()
+            torch.cuda.synchronize()
+            timings[rep] = starter.elapsed_time(ender)
 
-total_time = timings.sum() / 1000.  # millisecond to second
-fps = repetitions / (total_time)
+    total_time = timings.sum() / 1000.  # millisecond to second
+else:
+    start = time.perf_counter()
+    with torch.no_grad():
+        for _ in tqdm.tqdm(range(repetitions)):
+            _ = model(dummy_input)
+    total_time = time.perf_counter() - start
+
+fps = repetitions / total_time
 print('fps={}'.format(fps))
