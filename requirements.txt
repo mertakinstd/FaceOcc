@@ -6,6 +6,6 @@ opencv-python-headless==4.13.0.92
 matplotlib==3.11.1
 tqdm==4.69.1
 safetensors==0.8.0
-onnxruntime==1.27.0
+onnxruntime-gpu==1.27.0
 PyYAML==6.0.3
 gdown==5.2.0

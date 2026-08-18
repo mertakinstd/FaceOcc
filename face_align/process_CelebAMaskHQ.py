@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 from pathlib import Path
 
 import cv2
@@ -52,11 +51,12 @@ def main():
     OUTPUT_IMAGE_ROOT.mkdir(parents=True)
     OUTPUT_MASK_ROOT.mkdir(parents=True)
 
-    images = sorted(name for name in os.listdir(IMAGE_ROOT) if name.lower().endswith('.jpg'))
-    if len(images) != 30000:
-        raise RuntimeError(f'Expected 30,000 CelebA-HQ images, found {len(images)}')
+    landmarks = sorted(LANDMARK_ROOT.glob('*.npy'), key=lambda path: int(path.stem))
+    if not landmarks:
+        raise RuntimeError('No prepared landmarks found')
 
-    for name in tqdm(images, desc='Aligning CelebAMask-HQ', unit='image'):
+    for landmark_path in tqdm(landmarks, desc='Aligning CelebAMask-HQ', unit='image'):
+        name = f'{landmark_path.stem}.jpg'
         image, mask = process(name)
         if not cv2.imwrite(str(OUTPUT_IMAGE_ROOT / name), image):
             raise OSError(f'Failed to write aligned image: {name}')

@@ -5,6 +5,7 @@ import types
 
 import cv2
 import numpy as np
+import torch
 import onnxruntime as ort
 import yaml
 from tqdm import tqdm
@@ -13,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 THREEDDFA = ROOT / '.tools' / '3DDFA_V2'
 IMAGE_ROOT = ROOT / 'data' / 'raw' / 'CelebAMask-HQ' / 'CelebA-HQ-img'
 OUTPUT_ROOT = ROOT / 'data' / 'prepared' / 'landmarks'
+CUDA_PROVIDER = 'CUDAExecutionProvider'
 
 
 def cpu_nms(dets, threshold):
@@ -67,6 +69,25 @@ from utils.io import _load  # noqa: E402
 from utils.tddfa_util import _parse_param, similar_transform  # noqa: E402
 
 
+def cuda_session(path):
+    if CUDA_PROVIDER not in ort.get_available_providers():
+        raise RuntimeError('ONNX Runtime CUDAExecutionProvider is unavailable')
+    options = ort.SessionOptions()
+    options.log_severity_level = 3
+    session = ort.InferenceSession(
+        str(path), sess_options=options, providers=[CUDA_PROVIDER, 'CPUExecutionProvider']
+    )
+    if session.get_providers()[0] != CUDA_PROVIDER:
+        raise RuntimeError('Failed to initialize ONNX Runtime CUDAExecutionProvider')
+    return session
+
+
+class CUDAFaceBoxes(FaceBoxes_ONNX):
+    def __init__(self):
+        self.session = cuda_session(THREEDDFA / 'FaceBoxes' / 'weights' / 'FaceBoxesProd.onnx')
+        self.timer_flag = False
+
+
 class SparseTDDFA:
     def __init__(self, config):
         self.size = int(config.get('size', 120))
@@ -82,10 +103,7 @@ class SparseTDDFA:
         params = _load(str(THREEDDFA / f'configs/param_mean_std_62d_{self.size}x{self.size}.pkl'))
         self.param_mean = params['mean']
         self.param_std = params['std']
-        self.session = ort.InferenceSession(
-            str(THREEDDFA / 'weights' / 'mb1_120x120.onnx'),
-            providers=['CPUExecutionProvider'],
-        )
+        self.session = cuda_session(THREEDDFA / 'weights' / 'mb1_120x120.onnx')
 
     def landmarks(self, image, box):
         roi_box = parse_roi_box_from_bbox(box)
@@ -114,24 +132,35 @@ def main():
     if len(images) != 30000:
         raise RuntimeError(f'Expected 30,000 CelebA-HQ images, found {len(images)}')
 
+    if not torch.cuda.is_available():
+        raise RuntimeError('CUDA is required for landmark preparation')
+
     with (THREEDDFA / 'configs' / 'mb1_120x120.yml').open(encoding='utf-8') as handle:
         model = SparseTDDFA(yaml.safe_load(handle))
-    detector = FaceBoxes_ONNX()
+    detector = CUDAFaceBoxes()
     OUTPUT_ROOT.mkdir(parents=True)
 
+    detected = 0
+    missed = 0
     for image_path in tqdm(images, desc='3DDFA landmarks', unit='image'):
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if image is None:
             raise RuntimeError(f'Failed to read {image_path}')
 
         boxes = detector(image)
-        if len(boxes) != 1:
-            raise RuntimeError(f'Expected one face in {image_path}, detected {len(boxes)}')
+        if len(boxes) == 0:
+            missed += 1
+            continue
 
-        landmarks = model.landmarks(image, boxes[0])
+        box = max(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+        landmarks = model.landmarks(image, box)
         if landmarks.shape != (68, 2) or not np.isfinite(landmarks).all():
             raise RuntimeError(f'Invalid landmarks for {image_path}')
         np.save(OUTPUT_ROOT / f'{image_path.stem}.npy', landmarks, allow_pickle=False)
+        detected += 1
+
+    total = len(images)
+    print(f'3DDFA landmarks: {detected}/{total} successful ({detected / total:.2%}), {missed} undetected')
 
 
 if __name__ == '__main__':

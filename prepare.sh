@@ -66,12 +66,18 @@ run python -m face_align.process_CelebAMaskHQ
 landmark_count="$(find "$LANDMARKS" -maxdepth 1 -type f -name '*.npy' | wc -l | tr -d ' ')"
 image_count="$(find "$ALIGNED_IMAGES" -maxdepth 1 -type f | wc -l | tr -d ' ')"
 mask_count="$(find "$ALIGNED_MASKS" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')"
-[[ "$landmark_count" -eq 30000 ]] || die "Expected 30,000 landmark files, found $landmark_count."
-[[ "$image_count" -eq 30000 ]] || die "Expected 30,000 aligned images, found $image_count."
-[[ "$mask_count" -eq 30000 ]] || die "Expected 30,000 aligned masks, found $mask_count."
+[[ "$landmark_count" -gt 0 ]] || die "No landmarks were generated."
+[[ "$image_count" -eq "$landmark_count" ]] || die "Aligned image count does not match landmark count."
+[[ "$mask_count" -eq "$landmark_count" ]] || die "Aligned mask count does not match landmark count."
 
 run python - <<'PY'
-from Dataset.dataset import FaceMask, COFW_test
+from pathlib import Path
+from Dataset.dataset import FaceMask, COFW_test, mask_root, occ_root
+
+required = Path(occ_root) / 'CelebAHQ'
+missing = [path.stem for path in required.iterdir() if not (Path(mask_root) / f'{path.stem}.png').is_file()]
+if missing:
+    raise RuntimeError(f'{len(missing)} FaceOcc CelebAHQ samples lack aligned masks')
 
 train = FaceMask()
 valid = COFW_test()
@@ -81,4 +87,4 @@ assert mask.shape in {(1, 256, 256), (256, 256)}
 assert len(valid) > 0
 PY
 
-log "Dataset preparation complete"
+log "Dataset preparation complete: $landmark_count/30000 CelebA-HQ samples aligned"

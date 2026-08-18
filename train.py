@@ -10,8 +10,24 @@ import os
 
 train_dataset = FaceMask()
 valid_dataset = COFW_test()
-train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4, drop_last=False)
-valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=True, num_workers=4, drop_last=False)
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=16,
+    shuffle=True,
+    num_workers=4,
+    pin_memory=True,
+    persistent_workers=True,
+    drop_last=False,
+)
+valid_loader = DataLoader(
+    valid_dataset,
+    batch_size=1,
+    shuffle=True,
+    num_workers=4,
+    pin_memory=True,
+    persistent_workers=True,
+    drop_last=False,
+)
 
 epochs = 30
 model_root = './pretrained/'
