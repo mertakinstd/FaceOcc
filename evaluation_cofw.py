@@ -1,4 +1,3 @@
-import segmentation_models_pytorch as smp
 import torch
 from torch import nn
 from torchvision import transforms as TF
@@ -10,20 +9,14 @@ import os
 import tqdm
 import time
 from safetensors.torch import load_file
+from faceocc_runtime import build_faceocc_model, configure_cuda_performance
 
-ENCODER = 'resnet18'
-ENCODER_WEIGHTS = 'imagenet'
-CLASSES = 1
-ATTENTION = None
-ACTIVATION = None
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+configure_cuda_performance()
 root = './Dataset/FaceOcc/COFW_test/img'
 root_mask = './Dataset/FaceOcc/COFW_test/mask'
 to_tensor = TF.ToTensor()
-model = smp.Unet(encoder_name=ENCODER,
-                 encoder_weights=ENCODER_WEIGHTS,
-                 classes=CLASSES,
-                 activation=ACTIVATION)
+model = build_faceocc_model()
 
 weights_path = os.environ.get('FACEOCC_WEIGHTS', './pretrained/epoch_16_best.safetensors')
 weights = load_file(weights_path, device='cpu')

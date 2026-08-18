@@ -1,21 +1,13 @@
 name: faceocc
 
 channels:
-  - pytorch
   - conda-forge
 
+# Micromamba owns only the portable Python base. GPU-enabled PyTorch is
+# installed by setup.sh from PyTorch's official CUDA 13.2 wheel index so the
+# repository never depends on a system-wide CUDA Toolkit.
 dependencies:
-  - python=3.10.13
-  - pip=24.3.1
-  - setuptools=75.6.0
-  - wheel=0.45.1
-  - pytorch=1.12.1
-  - torchvision=0.13.1
-  - cudatoolkit=11.6
-  - numpy=1.23.5
-  - scipy=1.9.3
-  - pillow=9.2.0
-  - opencv=4.6.0
-  - tqdm=4.64.1
-  - pip:
-      - -r requirements.txt
+  - python=3.12.13
+  - pip
+  - setuptools
+  - wheel

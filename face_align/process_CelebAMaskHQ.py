@@ -1,25 +1,28 @@
+import argparse
 import cv2
 import os
 import pathlib
+import sys
 import numpy as np
 import pickle
 from PIL import Image
-from face_align.align import Preprocess
-from face_align.visualization import vis_parsing_maps
 import tqdm
 
-# Specify the root of related data
-root_img = '/media/xn/1TDisk/CelebAMask-HQ/CelebA-HQ-img/'
-root_mask = '/media/xn/1TDisk/CelebAMask-HQ/CelebAMask-HQ-mask-anno/'
-root_ldmk = '/media/xn/SSD1T/CelebAMask-HQ/ldmk_init/'  # landmark detected by 3ddfa-v2
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-pth = pathlib.Path(__file__).parent.parent.absolute()
-root_img_sv = os.path.join(pth, 'Dataset/CelebA-HQ-align/')
-root_mask_sv = os.path.join(pth, 'Dataset/CelebAMask-HQ-align/')
-if not os.path.exists(root_img_sv):
-    os.mkdir(root_img_sv)
-if not os.path.exists(root_mask_sv):
-    os.mkdir(root_mask_sv)
+from face_align.align import Preprocess
+from face_align.visualization import vis_parsing_maps
+RAW_ROOT = REPO_ROOT / 'data' / 'raw' / 'CelebAMask-HQ'
+
+# Defaults match setup.sh's deterministic raw-data layout. They remain module
+# globals because the original helper functions read them directly.
+root_img = str(RAW_ROOT / 'CelebA-HQ-img')
+root_mask = str(RAW_ROOT / 'CelebAMask-HQ-mask-anno')
+root_ldmk = str(RAW_ROOT / 'ldmk_init')  # landmarks detected by 3DDFA_V2
+root_img_sv = str(REPO_ROOT / 'Dataset' / 'CelebA-HQ-align')
+root_mask_sv = str(REPO_ROOT / 'Dataset' / 'CelebAMask-HQ-align')
 
 atts = ['skin', 'l_brow', 'r_brow', 'eye_g', 'l_eye', 'r_eye', 'nose', 'mouth', 'u_lip', 'l_lip', 'hair', 'hat']
 
@@ -61,17 +64,52 @@ def process(img_name):
     return img, seg, ldmk
 
 
-if __name__ == '__main__':
+def parse_args():
+    parser = argparse.ArgumentParser(description='Align CelebAMask-HQ for FaceOcc training.')
+    parser.add_argument('--image-root', default=root_img)
+    parser.add_argument('--mask-root', default=root_mask)
+    parser.add_argument('--landmark-root', default=root_ldmk)
+    parser.add_argument('--output-image-root', default=root_img_sv)
+    parser.add_argument('--output-mask-root', default=root_mask_sv)
+    parser.add_argument(
+        '--preview',
+        action='store_true',
+        help='Show the legacy OpenCV visualization (requires a GUI-enabled OpenCV build and display).',
+    )
+    return parser.parse_args()
+
+
+def main():
+    global root_img, root_mask, root_ldmk, root_img_sv, root_mask_sv
+
+    args = parse_args()
+    root_img = os.path.abspath(args.image_root)
+    root_mask = os.path.abspath(args.mask_root)
+    root_ldmk = os.path.abspath(args.landmark_root)
+    root_img_sv = os.path.abspath(args.output_image_root)
+    root_mask_sv = os.path.abspath(args.output_mask_root)
+
+    for required, label in (
+        (root_img, 'CelebA-HQ image root'),
+        (root_mask, 'CelebAMask-HQ mask root'),
+        (root_ldmk, '3DDFA landmark root'),
+    ):
+        if not os.path.isdir(required):
+            raise FileNotFoundError(f'{label} not found: {required}')
+
+    os.makedirs(root_img_sv, exist_ok=True)
+    os.makedirs(root_mask_sv, exist_ok=True)
+
     for name in tqdm.tqdm(os.listdir(root_img)):
         img, seg, ldmk = process(name)
 
-        # Uncomment for visualization
-        img_mask = vis_parsing_maps(img, seg, 1)
-        show = np.concatenate((img, img_mask))
-        cv2.imshow('seg', show)
-        key = cv2.waitKey(0)
-        if key == ord('q'):
-            break
+        if args.preview:
+            img_mask = vis_parsing_maps(img, seg, 1)
+            show = np.concatenate((img, img_mask))
+            cv2.imshow('seg', show)
+            key = cv2.waitKey(0)
+            if key == ord('q'):
+                break
 
         img_sv_pth = os.path.join(root_img_sv, name)
         cv2.imwrite(img_sv_pth, img)
@@ -81,4 +119,9 @@ if __name__ == '__main__':
         with open(seg_sv_pth, 'wb') as f:
             pickle.dump(seg, f)
 
-    cv2.destroyAllWindows()
+    if args.preview:
+        cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    main()

@@ -1,8 +1,10 @@
-# Pip layer for the reproducible FaceOcc environment.
-# PyTorch/torchvision and the numeric stack are pinned in environment.yml
-# so Micromamba can install the matching CUDA runtime without a system CUDA toolkit.
-segmentation-models-pytorch==0.2.1
-pretrainedmodels==0.7.4
-efficientnet-pytorch==0.6.3
-timm==0.4.12
+# FaceOcc runtime / preprocessing dependencies.
+# torch and torchvision are deliberately installed separately by setup.sh from
+# https://download.pytorch.org/whl/cu132 to guarantee the CUDA 13.2 build.
+segmentation-models-pytorch==0.5.0
+numpy==2.5.1
+scipy==1.18.0
+Pillow==12.3.0
+opencv-python-headless==4.13.0.92
+tqdm==4.69.1
 safetensors==0.8.0

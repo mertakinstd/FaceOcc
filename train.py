@@ -1,4 +1,3 @@
-import segmentation_models_pytorch as smp
 import torch
 from torch import nn
 from safetensors.torch import save_file
@@ -6,6 +5,7 @@ from torch.utils.data import DataLoader
 from Dataset.dataset import FaceMask, COFW_test
 from loss import OhemBCELoss, DiceLoss, IoU, Precision
 from train_utils import TrainEpoch, ValidEpoch
+from faceocc_runtime import build_faceocc_model, configure_cuda_performance
 import os
 import shutil
 
@@ -19,22 +19,13 @@ model_root = './pretrained/'
 if not os.path.exists(model_root):
     os.mkdir(model_root)
 
-ENCODER = 'resnet18'
-ENCODER_WEIGHTS = 'imagenet'
-CLASSES = 1
-ATTENTION = None
-ACTIVATION = None
 if not torch.cuda.is_available():
     raise RuntimeError('CUDA is required for FaceOcc training; CPU training is intentionally unsupported.')
 
 DEVICE = torch.device('cuda')
+configure_cuda_performance()
 
-model = smp.Unet(encoder_name=ENCODER,
-                 encoder_weights=ENCODER_WEIGHTS,
-                 decoder_attention_type=ATTENTION,
-                 classes=CLASSES,
-                 activation=ACTIVATION)
-
+model = build_faceocc_model()
 model = model.to(DEVICE)
 if torch.cuda.device_count() > 1:
     model = nn.DataParallel(model)
@@ -43,7 +34,7 @@ else:
     print(f'Using CUDA device 0: {torch.cuda.get_device_name(0)}')
 # state_dict = torch.load('pretrained/epoch_26_best.ckpt')
 # model.load_state_dict(state_dict)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, foreach=False)
 
 loss_bce = OhemBCELoss(thresh=0.7, n_min=256 ** 2-1).to(DEVICE)
 loss_dice = DiceLoss().to(DEVICE)

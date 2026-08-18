@@ -18,6 +18,10 @@ FACEOCC_ARCHIVE_SIZE="538014369"
 CELEBAMASK_ARCHIVE_SIZE="3153930546"
 GDOWN_VERSION="5.2.0"
 ENV_NAME="faceocc"
+PYTHON_SERIES="3.12"
+PYTORCH_VERSION="2.13.0+cu132"
+TORCHVISION_VERSION="0.28.0+cu132"
+PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu132"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$SCRIPT_DIR"
@@ -150,17 +154,47 @@ install_micromamba() {
     [[ -x "$MICROMAMBA" ]] || die "micromamba installation failed."
 }
 
+environment_exists() {
+    "$MICROMAMBA" env list | awk '{print $1}' | grep -Fxq "$ENV_NAME"
+}
+
 create_environment() {
-    if "$MICROMAMBA" env list | awk '{print $1}' | grep -Fxq "$ENV_NAME"; then
-        log "Micromamba environment '$ENV_NAME' already exists; updating from environment.yml"
-        "$MICROMAMBA" env update -n "$ENV_NAME" -f "$REPO_ROOT/environment.yml" -y
-    else
+    if environment_exists; then
+        local current_python
+        current_python="$(
+            "$MICROMAMBA" run -n "$ENV_NAME" python -c \
+                'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' \
+                2>/dev/null || true
+        )"
+
+        if [[ "$current_python" != "$PYTHON_SERIES" ]]; then
+            log "Existing '$ENV_NAME' uses Python ${current_python:-unknown}; rebuilding for Python $PYTHON_SERIES"
+            "$MICROMAMBA" env remove -n "$ENV_NAME" -y
+        else
+            log "Micromamba environment '$ENV_NAME' already uses Python $PYTHON_SERIES; updating base environment"
+            "$MICROMAMBA" env update -n "$ENV_NAME" -f "$REPO_ROOT/environment.yml" -y
+        fi
+    fi
+
+    if ! environment_exists; then
         log "Creating Micromamba environment '$ENV_NAME'"
         (
             cd "$REPO_ROOT"
             "$MICROMAMBA" create -f environment.yml -y
         )
     fi
+
+    log "Installing PyTorch $PYTORCH_VERSION / torchvision $TORCHVISION_VERSION from the official CUDA 13.2 index"
+    "$MICROMAMBA" run -n "$ENV_NAME" python -m pip install \
+        --disable-pip-version-check --no-cache-dir \
+        --index-url "$PYTORCH_INDEX_URL" \
+        "torch==$PYTORCH_VERSION" \
+        "torchvision==$TORCHVISION_VERSION"
+
+    log "Installing pinned FaceOcc runtime dependencies"
+    "$MICROMAMBA" run -n "$ENV_NAME" python -m pip install \
+        --disable-pip-version-check --no-cache-dir \
+        -r "$REPO_ROOT/requirements.txt"
 
     # gdown is a setup/download utility rather than a model runtime dependency.
     if ! "$MICROMAMBA" run -n "$ENV_NAME" python -c 'import gdown' >/dev/null 2>&1; then
@@ -280,9 +314,48 @@ preflight() {
     log "Running environment and dataset preflight"
 
     "$MICROMAMBA" run -n "$ENV_NAME" python - <<'PY'
+import sys
+import cv2
+import numpy as np
+import scipy
+import segmentation_models_pytorch as smp
 import torch
-print(f"PyTorch: {torch.__version__}")
-print(f"CUDA build: {torch.version.cuda}")
+import torchvision
+import PIL
+import safetensors
+import tqdm
+
+expected = {
+    "python": "3.12",
+    "torch": "2.13.0+cu132",
+    "torchvision": "0.28.0+cu132",
+    "cuda": "13.2",
+    "smp": "0.5.0",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "pillow": "12.3.0",
+    "opencv": "4.13.0",
+    "tqdm": "4.69.1",
+    "safetensors": "0.8.0",
+}
+actual = {
+    "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+    "torch": torch.__version__,
+    "torchvision": torchvision.__version__,
+    "cuda": torch.version.cuda,
+    "smp": smp.__version__,
+    "numpy": np.__version__,
+    "scipy": scipy.__version__,
+    "pillow": PIL.__version__,
+    "opencv": cv2.__version__,
+    "tqdm": tqdm.__version__,
+    "safetensors": safetensors.__version__,
+}
+for key, value in actual.items():
+    print(f"{key}: {value}")
+    if value != expected[key]:
+        raise SystemExit(f"ERROR: {key} version mismatch: expected {expected[key]}, got {value}")
+
 print(f"CUDA available: {torch.cuda.is_available()}")
 print(f"Visible CUDA devices: {torch.cuda.device_count()}")
 if not torch.cuda.is_available():
