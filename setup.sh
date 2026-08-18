@@ -1,437 +1,164 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# FaceOcc bootstrap for Linux.
-# - installs a repo-local micromamba binary and root prefix
-# - creates the environment from environment.yml
-# - loads local setup configuration from .env (without executing it as shell code)
-# - downloads FaceOcc.zip and CelebAMask-HQ.zip from configured Google Drive URLs
-# - extracts datasets into deterministic locations
-#
-# Usage:
-#   cp .env.example .env
-#   # Edit .env, review the CelebAMask-HQ license, then set
-#   # CELEBAMASK_LICENSE_ACCEPTED=1 if you accept it.
-#   ./setup.sh
-
+ENV_NAME="faceocc"
 FACEOCC_ARCHIVE_SIZE="538014369"
 CELEBAMASK_ARCHIVE_SIZE="3153930546"
-GDOWN_VERSION="5.2.0"
-ENV_NAME="faceocc"
-PYTHON_SERIES="3.12"
-PYTORCH_VERSION="2.13.0+cu132"
-TORCHVISION_VERSION="0.28.0+cu132"
 PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu132"
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-REPO_ROOT="$SCRIPT_DIR"
-TOOLS_DIR="$REPO_ROOT/.tools"
-MAMBA_ROOT_PREFIX="$REPO_ROOT/.micromamba"
-MICROMAMBA="$TOOLS_DIR/micromamba/bin/micromamba"
-DOWNLOAD_DIR="$REPO_ROOT/.cache/faceocc-downloads"
-EXTRACT_DIR="$REPO_ROOT/.cache/faceocc-extract"
-FACEOCC_DEST="$REPO_ROOT/Dataset/FaceOcc"
-CELEBAMASK_DEST="$REPO_ROOT/data/raw/CelebAMask-HQ"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+TOOLS="$ROOT/.tools"
+MAMBA_ROOT_PREFIX="$ROOT/.micromamba"
+MICROMAMBA="$TOOLS/micromamba/bin/micromamba"
+DOWNLOADS="$ROOT/.cache/faceocc-downloads"
+FACEOCC_DIR="$ROOT/Dataset/FaceOcc"
+CELEBAMASK_DIR="$ROOT/data/raw/CelebAMask-HQ"
 
-export MAMBA_ROOT_PREFIX
-export MAMBA_NO_BANNER=1
+export MAMBA_ROOT_PREFIX MAMBA_NO_BANNER=1
 
-log()  { printf '\n[FaceOcc setup] %s\n' "$*"; }
-die()  { printf '\n[FaceOcc setup] ERROR: %s\n' "$*" >&2; exit 1; }
-need() { command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
+log() { printf '\n[FaceOcc setup] %s\n' "$*"; }
+die() { printf '\n[FaceOcc setup] ERROR: %s\n' "$*" >&2; exit 1; }
 
-usage() {
-    cat <<'USAGE'
-Usage: ./setup.sh
+[[ "$#" -eq 0 ]] || die "setup.sh takes no arguments."
+[[ -f "$ROOT/.env" ]] || die "Missing .env. Copy .env.example to .env and configure it."
+set -a
+# shellcheck disable=SC1091
+source "$ROOT/.env"
+set +a
 
-Configuration is read from .env in the repository root. Start with:
-  cp .env.example .env
+[[ -n "${FACEOCC_GDRIVE_URL:-}" ]] || die "FACEOCC_GDRIVE_URL is not set."
+[[ -n "${CELEBAMASK_GDRIVE_URL:-}" ]] || die "CELEBAMASK_GDRIVE_URL is not set."
+[[ "${CELEBAMASK_LICENSE_ACCEPTED:-0}" == "1" ]] || die "Set CELEBAMASK_LICENSE_ACCEPTED=1 after accepting the CelebAMask-HQ license."
 
-Required .env values:
-  FACEOCC_GDRIVE_URL=...
-  CELEBAMASK_GDRIVE_URL=...
-  CELEBAMASK_LICENSE_ACCEPTED=1
+for command in curl tar unzip find stat; do
+    command -v "$command" >/dev/null || die "Required command not found: $command"
+done
+[[ "$(uname -s)" == "Linux" ]] || die "Linux is required."
 
-Optional:
-  KEEP_ARCHIVES=1
-
-CelebAMask-HQ is restricted to non-commercial research/educational use by
-its upstream dataset agreement. Set CELEBAMASK_LICENSE_ACCEPTED=1 only after
-reviewing and accepting that agreement.
-USAGE
-}
-
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    usage
-    exit 0
-fi
-[[ "$#" -eq 0 ]] || die "setup.sh takes no arguments; configure it through .env (use --help for details)."
-
-trim_env_value() {
-    local value="$1"
-    value="${value%$'\r'}"
-    # Strip matching single or double quotes without eval/source.
-    if [[ ${#value} -ge 2 ]]; then
-        if [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]] || \
-           [[ "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
-            value="${value:1:${#value}-2}"
-        fi
-    fi
-    printf '%s' "$value"
-}
-
-load_env_file() {
-    local env_file="$REPO_ROOT/.env"
-    [[ -f "$env_file" ]] || die \
-        ".env not found. Run 'cp .env.example .env', edit it, then rerun setup.sh."
-
-    local line key value line_no=0
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        ((line_no += 1))
-        line="${line%$'\r'}"
-        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-        [[ "$line" == *=* ]] || die "Invalid .env entry at line $line_no: expected KEY=VALUE."
-
-        key="${line%%=*}"
-        value="${line#*=}"
-        key="${key//[[:space:]]/}"
-        value="$(trim_env_value "$value")"
-
-        case "$key" in
-            FACEOCC_GDRIVE_URL) FACEOCC_GDRIVE_URL="$value" ;;
-            CELEBAMASK_GDRIVE_URL) CELEBAMASK_GDRIVE_URL="$value" ;;
-            CELEBAMASK_LICENSE_ACCEPTED) CELEBAMASK_LICENSE_ACCEPTED="$value" ;;
-            KEEP_ARCHIVES) KEEP_ARCHIVES="$value" ;;
-            *) die "Unknown .env key '$key' at line $line_no." ;;
-        esac
-    done < "$env_file"
-}
-
-load_env_file
-
-[[ -n "${FACEOCC_GDRIVE_URL:-}" ]] || die "FACEOCC_GDRIVE_URL is empty in .env."
-[[ -n "${CELEBAMASK_GDRIVE_URL:-}" ]] || die "CELEBAMASK_GDRIVE_URL is empty in .env."
-[[ "${CELEBAMASK_LICENSE_ACCEPTED:-0}" == "1" ]] || die \
-    "CelebAMask-HQ license not accepted. Review it, then set CELEBAMASK_LICENSE_ACCEPTED=1 in .env."
-
-[[ -f "$REPO_ROOT/environment.yml" ]] || die "environment.yml not found in repo root: $REPO_ROOT"
-[[ -f "$REPO_ROOT/requirements.txt" ]] || die "requirements.txt not found in repo root: $REPO_ROOT"
-[[ -f "$REPO_ROOT/train.py" ]] || die "train.py not found; run setup.sh from the FaceOcc repository root."
-
-need curl
-need tar
-need unzip
-need find
-need awk
-need wc
-need stat
-
-case "$(uname -s)" in
-    Linux) ;;
-    *) die "This setup script currently supports Linux only." ;;
-esac
-
-case "$(uname -m)" in
-    x86_64|amd64) MAMBA_PLATFORM="linux-64" ;;
-    aarch64|arm64) MAMBA_PLATFORM="linux-aarch64" ;;
-    *) die "Unsupported CPU architecture: $(uname -m)" ;;
-esac
+[[ "$(uname -m)" == "x86_64" ]] || die "Linux x86_64 is required by the current CUDA wheel set."
+MAMBA_PLATFORM="linux-64"
 
 install_micromamba() {
-    if [[ -x "$MICROMAMBA" ]]; then
-        log "Using existing repo-local micromamba: $MICROMAMBA"
-        return
-    fi
-
-    log "Installing repo-local micromamba ($MAMBA_PLATFORM)"
-    mkdir -p "$TOOLS_DIR/micromamba"
-    (
-        cd "$TOOLS_DIR/micromamba"
-        curl --fail --location --silent --show-error \
-            "https://micro.mamba.pm/api/micromamba/${MAMBA_PLATFORM}/latest" \
-            | tar -xj bin/micromamba
-    )
-    [[ -x "$MICROMAMBA" ]] || die "micromamba installation failed."
+    [[ -x "$MICROMAMBA" ]] && return
+    log "Installing Micromamba"
+    mkdir -p "$TOOLS/micromamba"
+    curl --fail --location --silent --show-error \
+        "https://micro.mamba.pm/api/micromamba/${MAMBA_PLATFORM}/latest" \
+        | tar -xj -C "$TOOLS/micromamba" bin/micromamba
 }
 
-environment_exists() {
-    "$MICROMAMBA" env list | awk '{print $1}' | grep -Fxq "$ENV_NAME"
-}
-
-create_environment() {
-    if environment_exists; then
-        local current_python
-        current_python="$(
-            "$MICROMAMBA" run -n "$ENV_NAME" python -c \
-                'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' \
-                2>/dev/null || true
-        )"
-
-        if [[ "$current_python" != "$PYTHON_SERIES" ]]; then
-            log "Existing '$ENV_NAME' uses Python ${current_python:-unknown}; rebuilding for Python $PYTHON_SERIES"
-            "$MICROMAMBA" env remove -n "$ENV_NAME" -y
-        else
-            log "Micromamba environment '$ENV_NAME' already uses Python $PYTHON_SERIES; updating base environment"
-            "$MICROMAMBA" env update -n "$ENV_NAME" -f "$REPO_ROOT/environment.yml" -y
-        fi
+install_environment() {
+    if [[ -x "$MAMBA_ROOT_PREFIX/envs/$ENV_NAME/bin/python" ]]; then
+        log "Updating environment"
+        "$MICROMAMBA" env update -n "$ENV_NAME" -f "$ROOT/environment.yml" -y
+    else
+        log "Creating environment"
+        "$MICROMAMBA" create -f "$ROOT/environment.yml" -y
     fi
 
-    if ! environment_exists; then
-        log "Creating Micromamba environment '$ENV_NAME'"
-        (
-            cd "$REPO_ROOT"
-            "$MICROMAMBA" create -f environment.yml -y
-        )
-    fi
-
-    log "Installing PyTorch $PYTORCH_VERSION / torchvision $TORCHVISION_VERSION from the official CUDA 13.2 index"
     "$MICROMAMBA" run -n "$ENV_NAME" python -m pip install \
         --disable-pip-version-check --no-cache-dir \
         --index-url "$PYTORCH_INDEX_URL" \
-        "torch==$PYTORCH_VERSION" \
-        "torchvision==$TORCHVISION_VERSION"
-
-    log "Installing pinned FaceOcc runtime dependencies"
+        "torch==2.13.0+cu132" "torchvision==0.28.0+cu132"
     "$MICROMAMBA" run -n "$ENV_NAME" python -m pip install \
         --disable-pip-version-check --no-cache-dir \
-        -r "$REPO_ROOT/requirements.txt"
-
-    # gdown is a setup/download utility rather than a model runtime dependency.
-    if ! "$MICROMAMBA" run -n "$ENV_NAME" python -c 'import gdown' >/dev/null 2>&1; then
-        log "Installing setup-only downloader gdown==$GDOWN_VERSION"
-        "$MICROMAMBA" run -n "$ENV_NAME" python -m pip install \
-            --disable-pip-version-check --no-cache-dir "gdown==$GDOWN_VERSION"
-    fi
+        -r "$ROOT/requirements.txt"
 }
 
-download_gdrive() {
-    local url="$1"
-    local output="$2"
-    local expected_size="$3"
-    local label="$4"
-
-    mkdir -p "$(dirname "$output")"
+download_archive() {
+    local url="$1" output="$2" size="$3" name="$4"
+    mkdir -p "$DOWNLOADS"
 
     if [[ -f "$output" ]]; then
-        local current_size
-        current_size="$(stat -c '%s' "$output")"
-        if [[ "$current_size" == "$expected_size" ]]; then
-            log "$label archive already downloaded and size matches; reusing it"
-            return
-        fi
-        if (( current_size < expected_size )); then
-            log "$label archive is partial ($current_size/$expected_size bytes); attempting resume"
-        else
-            log "$label archive is larger than expected ($current_size > $expected_size); removing it"
-            rm -f "$output"
-        fi
+        [[ "$(stat -c '%s' "$output")" == "$size" ]] || die "$name exists with an unexpected size; remove it and retry."
+        unzip -tq "$output" >/dev/null || die "$name failed ZIP integrity validation."
+        return
     fi
 
-    log "Downloading $label"
-    "$MICROMAMBA" run -n "$ENV_NAME" python -m gdown \
-        --continue --fuzzy "$url" \
-        -O "$output"
-
-    local actual_size
-    actual_size="$(stat -c '%s' "$output")"
-    [[ "$actual_size" == "$expected_size" ]] || die \
-        "$label download size mismatch: got $actual_size bytes, expected $expected_size bytes."
-
-    unzip -tq "$output" >/dev/null || die "$label archive failed ZIP integrity test."
-}
-
-find_dir_named() {
-    local root="$1"
-    local name="$2"
-    find "$root" -type d -name "$name" -print -quit
+    log "Downloading $name"
+    "$MICROMAMBA" run -n "$ENV_NAME" python -m gdown --fuzzy "$url" -O "$output"
+    [[ "$(stat -c '%s' "$output")" == "$size" ]] || die "$name has an unexpected size."
+    unzip -tq "$output" >/dev/null || die "$name failed ZIP integrity validation."
 }
 
 extract_faceocc() {
-    if [[ -d "$FACEOCC_DEST" ]]; then
-        if [[ -d "$FACEOCC_DEST/CelebAHQ" && -d "$FACEOCC_DEST/COFW_test" ]]; then
-            log "FaceOcc dataset already present: $FACEOCC_DEST"
-            return
-        fi
-        die "Existing $FACEOCC_DEST does not look like a complete FaceOcc dataset. Move/remove it before retrying."
+    if [[ -d "$FACEOCC_DIR" ]]; then
+        [[ -d "$FACEOCC_DIR/CelebAHQ" && -d "$FACEOCC_DIR/COFW_test" ]] || die "Invalid FaceOcc directory: $FACEOCC_DIR"
+        return
     fi
 
-    local archive="$DOWNLOAD_DIR/FaceOcc.zip"
-    local tmp="$EXTRACT_DIR/faceocc"
+    local tmp="$ROOT/.cache/faceocc-extract"
     rm -rf "$tmp"
     mkdir -p "$tmp"
-    log "Extracting FaceOcc"
-    unzip -q "$archive" -d "$tmp"
-
+    unzip -q "$DOWNLOADS/FaceOcc.zip" -d "$tmp"
     local src
-    src="$(find_dir_named "$tmp" "FaceOcc")"
-    if [[ -z "$src" ]]; then
-        # Some archives may contain the FaceOcc children directly at archive root.
-        if [[ -d "$tmp/CelebAHQ" && -d "$tmp/COFW_test" ]]; then
-            src="$tmp"
-        else
-            die "Could not locate FaceOcc dataset root inside FaceOcc.zip."
-        fi
-    fi
-
-    [[ -d "$src/CelebAHQ" ]] || die "FaceOcc/CelebAHQ missing after extraction."
-    [[ -d "$src/COFW_test" ]] || die "FaceOcc/COFW_test missing after extraction."
-
-    mkdir -p "$(dirname "$FACEOCC_DEST")"
-    mv "$src" "$FACEOCC_DEST"
+    src="$(find "$tmp" -type d -name FaceOcc -print -quit)"
+    [[ -n "$src" ]] || die "FaceOcc root was not found in FaceOcc.zip."
+    mkdir -p "$(dirname "$FACEOCC_DIR")"
+    mv "$src" "$FACEOCC_DIR"
     rm -rf "$tmp"
 }
 
 extract_celebamask() {
-    if [[ -d "$CELEBAMASK_DEST" ]]; then
-        if [[ -d "$CELEBAMASK_DEST/CelebA-HQ-img" && -d "$CELEBAMASK_DEST/CelebAMask-HQ-mask-anno" ]]; then
-            log "CelebAMask-HQ already present: $CELEBAMASK_DEST"
-            return
-        fi
-        die "Existing $CELEBAMASK_DEST does not look complete. Move/remove it before retrying."
+    if [[ -d "$CELEBAMASK_DIR" ]]; then
+        [[ -d "$CELEBAMASK_DIR/CelebA-HQ-img" && -d "$CELEBAMASK_DIR/CelebAMask-HQ-mask-anno" ]] || die "Invalid CelebAMask-HQ directory: $CELEBAMASK_DIR"
+        return
     fi
 
-    local archive="$DOWNLOAD_DIR/CelebAMask-HQ.zip"
-    local tmp="$EXTRACT_DIR/celebamask"
+    local tmp="$ROOT/.cache/celebamask-extract"
     rm -rf "$tmp"
     mkdir -p "$tmp"
-    log "Extracting CelebAMask-HQ"
-    unzip -q "$archive" -d "$tmp"
-
-    local img_dir src
-    img_dir="$(find_dir_named "$tmp" "CelebA-HQ-img")"
-    [[ -n "$img_dir" ]] || die "CelebA-HQ-img was not found inside CelebAMask-HQ.zip."
-    src="$(dirname "$img_dir")"
-
-    [[ -d "$src/CelebAMask-HQ-mask-anno" ]] || die \
-        "CelebAMask-HQ-mask-anno missing next to CelebA-HQ-img."
-
-    mkdir -p "$(dirname "$CELEBAMASK_DEST")"
-    mv "$src" "$CELEBAMASK_DEST"
+    unzip -q "$DOWNLOADS/CelebAMask-HQ.zip" -d "$tmp"
+    local images src
+    images="$(find "$tmp" -type d -name CelebA-HQ-img -print -quit)"
+    [[ -n "$images" ]] || die "CelebA-HQ-img was not found in CelebAMask-HQ.zip."
+    src="$(dirname "$images")"
+    [[ -d "$src/CelebAMask-HQ-mask-anno" ]] || die "CelebAMask-HQ-mask-anno was not found."
+    mkdir -p "$(dirname "$CELEBAMASK_DIR")"
+    mv "$src" "$CELEBAMASK_DIR"
     rm -rf "$tmp"
 }
 
 preflight() {
-    log "Running environment and dataset preflight"
-
     "$MICROMAMBA" run -n "$ENV_NAME" python - <<'PY'
 import sys
-import cv2
-import numpy as np
-import scipy
 import segmentation_models_pytorch as smp
 import torch
 import torchvision
-import PIL
-import safetensors
-import tqdm
 
-expected = {
-    "python": "3.12",
-    "torch": "2.13.0+cu132",
-    "torchvision": "0.28.0+cu132",
-    "cuda": "13.2",
-    "smp": "0.5.0",
-    "numpy": "2.5.1",
-    "scipy": "1.18.0",
-    "pillow": "12.3.0",
-    "opencv": "4.13.0",
-    "tqdm": "4.69.1",
-    "safetensors": "0.8.0",
-}
-actual = {
-    "python": f"{sys.version_info.major}.{sys.version_info.minor}",
-    "torch": torch.__version__,
-    "torchvision": torchvision.__version__,
-    "cuda": torch.version.cuda,
-    "smp": smp.__version__,
-    "numpy": np.__version__,
-    "scipy": scipy.__version__,
-    "pillow": PIL.__version__,
-    "opencv": cv2.__version__,
-    "tqdm": tqdm.__version__,
-    "safetensors": safetensors.__version__,
-}
-for key, value in actual.items():
-    print(f"{key}: {value}")
-    if value != expected[key]:
-        raise SystemExit(f"ERROR: {key} version mismatch: expected {expected[key]}, got {value}")
-
-print(f"CUDA available: {torch.cuda.is_available()}")
-print(f"Visible CUDA devices: {torch.cuda.device_count()}")
+assert sys.version_info[:2] == (3, 12)
+assert torch.__version__ == "2.13.0+cu132"
+assert torchvision.__version__ == "0.28.0+cu132"
+assert smp.__version__ == "0.5.0"
 if not torch.cuda.is_available():
-    raise SystemExit("ERROR: CUDA is unavailable; FaceOcc training is GPU-only.")
-for i in range(torch.cuda.device_count()):
-    print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
+    raise RuntimeError("CUDA is required for FaceOcc training")
 PY
 
-    local celeb_images faceocc_files
-    celeb_images="$(find "$CELEBAMASK_DEST/CelebA-HQ-img" -maxdepth 1 -type f | wc -l | tr -d ' ')"
-    faceocc_files="$(find "$FACEOCC_DEST" -type f | wc -l | tr -d ' ')"
-
-    [[ "$celeb_images" -eq 30000 ]] || die \
-        "Expected 30,000 CelebA-HQ images, found $celeb_images in $CELEBAMASK_DEST/CelebA-HQ-img."
-
-    printf '\nDataset preflight:\n'
-    printf '  FaceOcc files:       %s\n' "$faceocc_files"
-    printf '  CelebA-HQ images:    %s\n' "$celeb_images"
-    printf '  FaceOcc path:        %s\n' "$FACEOCC_DEST"
-    printf '  CelebAMask-HQ path:  %s\n' "$CELEBAMASK_DEST"
+    local count
+    count="$(find "$CELEBAMASK_DIR/CelebA-HQ-img" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+    [[ "$count" -eq 30000 ]] || die "Expected 30,000 CelebA-HQ images, found $count."
 }
 
-main() {
-    mkdir -p "$DOWNLOAD_DIR" "$EXTRACT_DIR"
+install_micromamba
+install_environment
 
-    install_micromamba
-    create_environment
+if [[ -e "$FACEOCC_DIR" && ( ! -d "$FACEOCC_DIR/CelebAHQ" || ! -d "$FACEOCC_DIR/COFW_test" ) ]]; then
+    die "Invalid FaceOcc directory: $FACEOCC_DIR"
+fi
+if [[ -e "$CELEBAMASK_DIR" && ( ! -d "$CELEBAMASK_DIR/CelebA-HQ-img" || ! -d "$CELEBAMASK_DIR/CelebAMask-HQ-mask-anno" ) ]]; then
+    die "Invalid CelebAMask-HQ directory: $CELEBAMASK_DIR"
+fi
 
-    if [[ -d "$FACEOCC_DEST/CelebAHQ" && -d "$FACEOCC_DEST/COFW_test" ]]; then
-        log "FaceOcc dataset already present; skipping its download"
-    else
-        download_gdrive \
-            "$FACEOCC_GDRIVE_URL" \
-            "$DOWNLOAD_DIR/FaceOcc.zip" \
-            "$FACEOCC_ARCHIVE_SIZE" \
-            "FaceOcc.zip"
-        extract_faceocc
-    fi
+if [[ ! -d "$FACEOCC_DIR/CelebAHQ" || ! -d "$FACEOCC_DIR/COFW_test" ]]; then
+    download_archive "$FACEOCC_GDRIVE_URL" "$DOWNLOADS/FaceOcc.zip" "$FACEOCC_ARCHIVE_SIZE" "FaceOcc.zip"
+    extract_faceocc
+fi
 
-    if [[ -d "$CELEBAMASK_DEST/CelebA-HQ-img" && -d "$CELEBAMASK_DEST/CelebAMask-HQ-mask-anno" ]]; then
-        log "CelebAMask-HQ already present; skipping its download"
-    else
-        download_gdrive \
-            "$CELEBAMASK_GDRIVE_URL" \
-            "$DOWNLOAD_DIR/CelebAMask-HQ.zip" \
-            "$CELEBAMASK_ARCHIVE_SIZE" \
-            "CelebAMask-HQ.zip"
-        extract_celebamask
-    fi
-    preflight
+if [[ ! -d "$CELEBAMASK_DIR/CelebA-HQ-img" || ! -d "$CELEBAMASK_DIR/CelebAMask-HQ-mask-anno" ]]; then
+    download_archive "$CELEBAMASK_GDRIVE_URL" "$DOWNLOADS/CelebAMask-HQ.zip" "$CELEBAMASK_ARCHIVE_SIZE" "CelebAMask-HQ.zip"
+    extract_celebamask
+fi
 
-    if [[ "${KEEP_ARCHIVES:-0}" != "1" ]]; then
-        log "Removing downloaded ZIP archives (set KEEP_ARCHIVES=1 to retain them)"
-        rm -f "$DOWNLOAD_DIR/FaceOcc.zip" "$DOWNLOAD_DIR/CelebAMask-HQ.zip"
-    fi
-
-    cat <<EOF_DONE
-
-[FaceOcc setup] Base setup complete.
-
-Repo-local micromamba:
-  $MICROMAMBA
-
-Environment root:
-  $MAMBA_ROOT_PREFIX
-
-To open an activated shell:
-  export MAMBA_ROOT_PREFIX="$MAMBA_ROOT_PREFIX"
-  eval "\$($MICROMAMBA shell hook -s bash)"
-  micromamba activate $ENV_NAME
-
-Raw datasets are ready. Training is NOT ready yet: CelebAMask-HQ still needs
-3DDFA_V2 landmark detection + FaceOcc alignment preprocessing to generate:
-  Dataset/CelebA-HQ-align/
-  Dataset/CelebAMask-HQ-align/
-EOF_DONE
-}
-
-main "$@"
+preflight
+rm -f "$DOWNLOADS/FaceOcc.zip" "$DOWNLOADS/CelebAMask-HQ.zip"
+log "Setup complete"

@@ -64,7 +64,7 @@ def process_img(img, seg, t, s, target_size=256):
                            [0, 0, 1]])
     coeff = np.linalg.inv(mat_extend).flatten()[:6]
     seg = Image.fromarray(seg)
-    seg_affine = seg.transform((target_size, target_size), Image.AFFINE, coeff, resample=Image.NEAREST)
+    seg_affine = seg.transform((target_size, target_size), Image.Transform.AFFINE, coeff, resample=Image.Resampling.NEAREST)
     seg_affine = np.array(seg_affine)
 
     corners = np.array([[0, 0, 1], [w0 - 1, h0 - 1, 1]])

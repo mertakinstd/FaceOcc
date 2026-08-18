@@ -7,7 +7,6 @@ from loss import OhemBCELoss, DiceLoss, IoU, Precision
 from train_utils import TrainEpoch, ValidEpoch
 from faceocc_runtime import build_faceocc_model, configure_cuda_performance
 import os
-import shutil
 
 train_dataset = FaceMask()
 valid_dataset = COFW_test()

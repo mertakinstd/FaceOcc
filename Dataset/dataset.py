@@ -19,6 +19,17 @@ occ_root = os.path.join(pth, 'Dataset', 'FaceOcc')
 cofw_img_root = os.path.join(pth, 'Dataset', 'FaceOcc', 'COFW_test/img')
 cofw_mask_root = os.path.join(pth, 'Dataset', 'FaceOcc', 'COFW_test/mask')
 
+
+def load_aligned_mask(name):
+    mask_name = os.path.splitext(os.path.basename(name))[0] + '.png'
+    mask_path = os.path.join(mask_root, mask_name)
+    mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
+    if mask is None:
+        raise FileNotFoundError(f'Aligned mask not found or unreadable: {mask_path}')
+    if mask.ndim != 2:
+        raise ValueError(f'Expected a single-channel aligned mask: {mask_path}')
+    return mask
+
 os.chdir(occ_root)
 FaceOcc = {'celeba': glob.glob('CelebAHQ/*'),
            'ffhq': glob.glob('ffhq/*'),
@@ -96,9 +107,7 @@ class FaceMask(Data.Dataset):
     def get_aug_data(self, name):
         I = Image.open(os.path.join(self.img_root, name))
         I = self.to_tensor(I)
-        pkl_name = name.split('.')[0] + '.pkl'
-        with open(os.path.join(self.mask_root, pkl_name), 'rb') as f:
-            mask = pickle.load(f)
+        mask = load_aligned_mask(name)
         mask = get_face_mask(mask).unsqueeze(0)
         occ, mask_occ = self.occ_gen()
         I = occ * mask_occ + I * (1 - mask_occ)
@@ -113,13 +122,13 @@ class FaceMask(Data.Dataset):
         I = Image.open(os.path.join(occ_root, name))
         I = self.to_tensor(I)
         rgb, mask_occ = I.split([3, 1], dim=0)
-        pkl_name = name.split('/')[1].split('.')[0] + '.pkl'
         if 'ffhq' in name:
+            pkl_name = name.split('/')[1].split('.')[0] + '.pkl'
             mask_pth = os.path.join(occ_root, 'ffhqMask', pkl_name)
+            with open(mask_pth, 'rb') as f:
+                mask = pickle.load(f)
         else:
-            mask_pth = os.path.join(self.mask_root, pkl_name)
-        with open(mask_pth, 'rb') as f:
-            mask = pickle.load(f)
+            mask = load_aligned_mask(name)
 
         mask = get_face_mask(mask, eye_glass=True) * (1 - mask_occ)
         data = {'img': rgb, 'mask': mask}
@@ -158,10 +167,8 @@ class COFW_test(Data.Dataset):
 
 
 class InputFetcher(object):
-    def __init__(self, batch_size=8, name='celeba', device=None):
-        if device is None:
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.device = torch.device(device)
+    def __init__(self, batch_size=8, name='celeba', device='cuda:0'):
+        self.device = device
         if name == 'train':
             self.dataset = FaceMask()
         elif name == 'test':
