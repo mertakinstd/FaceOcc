@@ -90,6 +90,9 @@ IoU-vs-probability-threshold curve. Training also records the realized
 real/synthetic, occluder-source, texture-replacement, and mask-asset sampling
 mixture for each epoch.
 
-The canonical scientific baseline keeps the existing modernized TF32 policy,
-while seeding Python/NumPy/PyTorch/CUDA RNGs, disabling persistent DataLoader
-workers, and using deterministic CUDA algorithm selection.
+The canonical scientific baseline uses IEEE FP32 for eligible CUDA matmul and
+convolution compute. This policy was promoted after the controlled TF32-vs-FP32
+ablation; TF32 remains an optional experiment/performance mode rather than the
+canonical scientific setting. Python/NumPy/PyTorch/CUDA RNGs are seeded,
+persistent DataLoader workers are disabled, and deterministic CUDA algorithm
+selection is enabled.

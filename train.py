@@ -45,7 +45,7 @@ def make_run_dir(args) -> Path:
     if args.run_dir is not None:
         run_dir = args.run_dir
     else:
-        run_dir = Path('runs') / f'resnet18_unet_ohembce_tf32_seed{args.seed}'
+        run_dir = Path('runs') / f'resnet18_unet_ohembce_fp32_seed{args.seed}'
     run_dir = run_dir.resolve()
     if run_dir.exists() and any(run_dir.iterdir()) and not args.allow_existing_run_dir:
         raise RuntimeError(
@@ -159,7 +159,7 @@ def main():
 
     config = {
         'seed': args.seed,
-        'precision': 'tf32',
+        'precision': 'fp32',
         'epochs': EPOCHS,
         'batch_size': BATCH_SIZE,
         'num_workers': NUM_WORKERS,
@@ -195,7 +195,7 @@ def main():
 
     try:
         for epoch in range(1, EPOCHS + 1):
-            print(f'\n Epoch: {epoch}/{EPOCHS} [tf32, seed={args.seed}]')
+            print(f'\n Epoch: {epoch}/{EPOCHS} [fp32, seed={args.seed}]')
             train_logs = train_epoch.run(train_loader)
             valid_logs = valid_epoch.run(valid_loader)
             row = flatten_epoch_row(epoch, optimizer, train_logs, valid_logs)
@@ -234,7 +234,7 @@ def main():
     total_seconds = time.perf_counter() - total_started
     summary = {
         'seed': args.seed,
-        'precision': 'tf32',
+        'precision': 'fp32',
         'best_epoch': best_epoch,
         'best_val_iou': max_score,
         'total_seconds': total_seconds,

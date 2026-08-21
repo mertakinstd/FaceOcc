@@ -43,15 +43,15 @@ def make_dataloader_generator(seed: int) -> torch.Generator:
 
 
 def configure_cuda_performance() -> None:
-    """Keep the modernized TF32 policy while making the run deterministic."""
+    """Configure the canonical deterministic IEEE FP32 scientific protocol."""
 
     if not torch.cuda.is_available():
         return
 
     torch.backends.fp32_precision = 'ieee'
-    torch.backends.cuda.matmul.fp32_precision = 'tf32'
+    torch.backends.cuda.matmul.fp32_precision = 'ieee'
     torch.backends.cudnn.fp32_precision = 'ieee'
-    torch.backends.cudnn.conv.fp32_precision = 'tf32'
+    torch.backends.cudnn.conv.fp32_precision = 'ieee'
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
     torch.use_deterministic_algorithms(True)
@@ -59,7 +59,7 @@ def configure_cuda_performance() -> None:
 
 def cuda_protocol_metadata() -> dict:
     metadata = {
-        'precision_mode': 'tf32',
+        'precision_mode': 'fp32',
         'deterministic_algorithms': bool(torch.are_deterministic_algorithms_enabled()),
         'cudnn_benchmark': bool(torch.backends.cudnn.benchmark),
         'cudnn_deterministic': bool(torch.backends.cudnn.deterministic),
