@@ -14,6 +14,9 @@ DECODER_CHANNELS = (256, 128, 64, 32, 16)
 DECODER_NORM = 'batchnorm'
 DECODER_INTERPOLATION = 'nearest'
 DEFAULT_SEED = 42
+INPUT_NORMALIZATION = 'imagenet'
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 def seed_everything(seed: int) -> None:
@@ -40,6 +43,25 @@ def make_dataloader_generator(seed: int) -> torch.Generator:
     generator = torch.Generator()
     generator.manual_seed(seed)
     return generator
+
+
+def make_faceocc_input_preprocess(device: torch.device):
+    """Build the canonical ImageNet RGB normalization used before model forward.
+
+    The FaceOcc data pipeline yields float RGB tensors in [0,1].  The canonical
+    scientific protocol normalizes those tensors after augmentation and before
+    the ResNet18 encoder, matching the winning normalization ablation arm.
+    """
+
+    mean = torch.tensor(IMAGENET_MEAN, dtype=torch.float32, device=device).view(1, 3, 1, 1)
+    std = torch.tensor(IMAGENET_STD, dtype=torch.float32, device=device).view(1, 3, 1, 1)
+
+    def normalize(x: torch.Tensor) -> torch.Tensor:
+        if x.ndim != 4 or x.shape[1] != 3:
+            raise ValueError(f'expected RGB NCHW input, got shape {tuple(x.shape)}')
+        return (x - mean) / std
+
+    return normalize
 
 
 def configure_cuda_performance() -> None:

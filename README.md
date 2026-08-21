@@ -93,6 +93,10 @@ mixture for each epoch.
 The canonical scientific baseline uses IEEE FP32 for eligible CUDA matmul and
 convolution compute. This policy was promoted after the controlled TF32-vs-FP32
 ablation; TF32 remains an optional experiment/performance mode rather than the
-canonical scientific setting. Python/NumPy/PyTorch/CUDA RNGs are seeded,
-persistent DataLoader workers are disabled, and deterministic CUDA algorithm
-selection is enabled.
+canonical scientific setting. The canonical ResNet18 input path also uses
+ImageNet normalization after augmentation and immediately before model forward:
+RGB tensors in `[0,1]` are normalized with mean `[0.485, 0.456, 0.406]` and
+standard deviation `[0.229, 0.224, 0.225]`. This policy was promoted after the
+controlled legacy-vs-ImageNet normalization ablation. Python/NumPy/PyTorch/CUDA
+RNGs are seeded, persistent DataLoader workers are disabled, and deterministic
+CUDA algorithm selection is enabled.

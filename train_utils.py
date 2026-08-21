@@ -26,6 +26,7 @@ class Epoch:
         verbose=True,
         diagnostics=None,
         collect_sampling=False,
+        input_preprocess=None,
     ):
         self.model = model
         self.loss = loss
@@ -37,6 +38,7 @@ class Epoch:
         self.show_step = show_step
         self.diagnostics = diagnostics
         self.collect_sampling = collect_sampling
+        self.input_preprocess = input_preprocess
         if not sv_pth:
             pth = pathlib.Path(__file__).parent.absolute()
             sv_folder = 'res'
@@ -136,7 +138,8 @@ class Epoch:
                 self.it += 1
                 x = x.to(self.device, non_blocking=True)
                 y = y.to(self.device, non_blocking=True)
-                loss, y_pred = self.batch_update(x, y)
+                model_x = self.input_preprocess(x) if self.input_preprocess is not None else x
+                loss, y_pred = self.batch_update(model_x, y)
                 loss_value = loss.item()
                 loss_meter.add(loss_value)
                 loss_logs = {self.loss.__name__: loss_meter.mean}
@@ -186,7 +189,9 @@ class Epoch:
 
 
 class TrainEpoch(Epoch):
-    def __init__(self, model, loss, metrics, optimizer, device='cpu', verbose=True):
+    def __init__(
+        self, model, loss, metrics, optimizer, device='cpu', verbose=True, input_preprocess=None
+    ):
         super().__init__(
             model=model,
             loss=loss,
@@ -195,6 +200,7 @@ class TrainEpoch(Epoch):
             device=device,
             verbose=verbose,
             collect_sampling=True,
+            input_preprocess=input_preprocess,
         )
         self.optimizer = optimizer
 
@@ -211,7 +217,9 @@ class TrainEpoch(Epoch):
 
 
 class ValidEpoch(Epoch):
-    def __init__(self, model, loss, metrics, device='cpu', verbose=True, diagnostics=None):
+    def __init__(
+        self, model, loss, metrics, device='cpu', verbose=True, diagnostics=None, input_preprocess=None
+    ):
         super().__init__(
             model=model,
             loss=loss,
@@ -221,6 +229,7 @@ class ValidEpoch(Epoch):
             verbose=verbose,
             show_step=200,
             diagnostics=diagnostics,
+            input_preprocess=input_preprocess,
         )
 
     def on_epoch_start(self):

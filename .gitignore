@@ -24,3 +24,6 @@
 # Python-generated files
 __pycache__/
 *.py[cod]
+
+# Scientific training/experiment outputs
+/runs/

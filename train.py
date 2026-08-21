@@ -16,10 +16,14 @@ from Dataset.dataset import COFW_test, FaceMask
 from diagnostics import ValidationDiagnostics
 from faceocc_runtime import (
     DEFAULT_SEED,
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    INPUT_NORMALIZATION,
     build_faceocc_model,
     configure_cuda_performance,
     cuda_protocol_metadata,
     make_dataloader_generator,
+    make_faceocc_input_preprocess,
     seed_everything,
     seed_worker,
 )
@@ -45,7 +49,7 @@ def make_run_dir(args) -> Path:
     if args.run_dir is not None:
         run_dir = args.run_dir
     else:
-        run_dir = Path('runs') / f'resnet18_unet_ohembce_fp32_seed{args.seed}'
+        run_dir = Path('runs') / f'resnet18_unet_ohembce_fp32_imagenetnorm_seed{args.seed}'
     run_dir = run_dir.resolve()
     if run_dir.exists() and any(run_dir.iterdir()) and not args.allow_existing_run_dir:
         raise RuntimeError(
@@ -120,6 +124,7 @@ def main():
     )
 
     device = torch.device('cuda')
+    input_preprocess = make_faceocc_input_preprocess(device)
     model = build_faceocc_model().to(device)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
@@ -147,6 +152,7 @@ def main():
         optimizer=optimizer,
         device=device,
         verbose=True,
+        input_preprocess=input_preprocess,
     )
     valid_epoch = ValidEpoch(
         model=model,
@@ -155,11 +161,17 @@ def main():
         device=device,
         verbose=True,
         diagnostics=diagnostics,
+        input_preprocess=input_preprocess,
     )
 
     config = {
         'seed': args.seed,
         'precision': 'fp32',
+        'normalization': INPUT_NORMALIZATION,
+        'input_range_before_normalization': '[0,1]',
+        'normalization_stage': 'after augmentation, immediately before model forward',
+        'imagenet_mean': list(IMAGENET_MEAN),
+        'imagenet_std': list(IMAGENET_STD),
         'epochs': EPOCHS,
         'batch_size': BATCH_SIZE,
         'num_workers': NUM_WORKERS,
@@ -195,7 +207,10 @@ def main():
 
     try:
         for epoch in range(1, EPOCHS + 1):
-            print(f'\n Epoch: {epoch}/{EPOCHS} [fp32, seed={args.seed}]')
+            print(
+                f'\n Epoch: {epoch}/{EPOCHS} '
+                f'[fp32, normalization={INPUT_NORMALIZATION}, seed={args.seed}]'
+            )
             train_logs = train_epoch.run(train_loader)
             valid_logs = valid_epoch.run(valid_loader)
             row = flatten_epoch_row(epoch, optimizer, train_logs, valid_logs)
@@ -235,6 +250,7 @@ def main():
     summary = {
         'seed': args.seed,
         'precision': 'fp32',
+        'normalization': INPUT_NORMALIZATION,
         'best_epoch': best_epoch,
         'best_val_iou': max_score,
         'total_seconds': total_seconds,
