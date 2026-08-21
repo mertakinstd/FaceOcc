@@ -31,10 +31,10 @@ def load_aligned_mask(name):
     return mask
 
 os.chdir(occ_root)
-FaceOcc = {'celeba': glob.glob('CelebAHQ/*'),
-           'ffhq': glob.glob('ffhq/*'),
-           'internet': glob.glob('internet/*/*'),
-           'texture': glob.glob('texture/*')}
+FaceOcc = {'celeba': sorted(glob.glob('CelebAHQ/*')),
+           'ffhq': sorted(glob.glob('ffhq/*')),
+           'internet': sorted(glob.glob('internet/*/*')),
+           'texture': sorted(glob.glob('texture/*'))}
 
 os.chdir(pth)
 
@@ -80,7 +80,16 @@ class OcclusionGenerator():
             tex = self.transform(tex)
             rgb = tex
         rgb = self.transform_color(rgb)
-        return rgb, mask
+        source = img_name.split('/', 1)[0]
+        if source == 'CelebAHQ':
+            source = 'celeba'
+        metadata = {
+            'sample_kind': 'synthetic',
+            'source': source,
+            'texture_replaced': bool(rand_tex),
+            'mask_asset': bool('mask' in img_name),
+        }
+        return rgb, mask, metadata
 
 
 class FaceMask(Data.Dataset):
@@ -98,7 +107,7 @@ class FaceMask(Data.Dataset):
         image_list = os.listdir(self.img_root)  # images in CelebA-HQ
         occ_list = os.listdir(os.path.join(occ_root, 'CelebAHQ'))  # occluded images in CelebA-HQ
         occ_list = [n.split('.')[0] + '.jpg' for n in occ_list]  # .png to .jpg
-        image_list = list(set(image_list) - set(occ_list))
+        image_list = sorted(set(image_list) - set(occ_list))
         return image_list
 
     def __len__(self):
@@ -109,13 +118,13 @@ class FaceMask(Data.Dataset):
         I = self.to_tensor(I)
         mask = load_aligned_mask(name)
         mask = get_face_mask(mask).unsqueeze(0)
-        occ, mask_occ = self.occ_gen()
+        occ, mask_occ, metadata = self.occ_gen()
         I = occ * mask_occ + I * (1 - mask_occ)
         mask = mask * (1 - mask_occ)
         data = {'img': I, 'mask': mask}
         data = self.transform(data)
         I, mask = data['img'], data['mask']
-        return I, mask
+        return I, mask, metadata
 
     def get_real_data(self):
         name = random.choice(self.img_list_real)
@@ -134,16 +143,23 @@ class FaceMask(Data.Dataset):
         data = {'img': rgb, 'mask': mask}
         data = self.transform(data)
         I, mask = data['img'], data['mask']
-        return I, mask
+        source = 'ffhq' if 'ffhq' in name else 'celeba'
+        metadata = {
+            'sample_kind': 'real',
+            'source': source,
+            'texture_replaced': False,
+            'mask_asset': False,
+        }
+        return I, mask, metadata
 
     def __getitem__(self, idx):
         p = random.random()
         if p < .3:
-            I, mask = self.get_real_data()
+            I, mask, metadata = self.get_real_data()
         else:
             name = self.img_list[idx]
-            I, mask = self.get_aug_data(name)
-        return I, mask
+            I, mask, metadata = self.get_aug_data(name)
+        return I, mask, metadata
 
 
 class COFW_test(Data.Dataset):
@@ -151,7 +167,7 @@ class COFW_test(Data.Dataset):
         self.img_root = cofw_img_root
         self.mask_root = cofw_mask_root
         self.to_tensor = TF.ToTensor()
-        self.img_lst = os.listdir(self.img_root)
+        self.img_lst = sorted(os.listdir(self.img_root))
 
     def __len__(self):
         return len(self.img_lst)
@@ -196,8 +212,7 @@ class InputFetcher(object):
             self.iter = self.get_iter()
             out = next(self.iter)
 
-        out = [o.to(self.device) for o in out]
-        return out[0], out[1]
+        return out[0].to(self.device), out[1].to(self.device)
 
 
 if __name__ == '__main__':

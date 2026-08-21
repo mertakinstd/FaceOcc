@@ -71,3 +71,25 @@ If you use our dataset, please cite our following works:
 >Xiangnan Yin, Di Huang, Liming Chen, “Non-Deterministic Face Mask Removal Based on 3D Priors”, 2022 IEEE International Conference on Image Processing (ICIP), Bordeaux, France, 16-19 October 2022. Find the video presentation [here](https://youtu.be/pspJsAq8rww). 
 
 
+
+
+## Scientific layer 1: reproducibility and diagnostics
+
+The modernized baseline now supports a seeded, deterministic stochastic training
+protocol. Augmentations remain random across samples/epochs, but the same seed
+replays the same DataLoader/RNG stream. DataLoader workers are intentionally
+non-persistent in this first scientific baseline.
+
+The legacy FaceOcc training objective and checkpoint-selection metric are
+unchanged: OHEM-BCE is optimized and the best checkpoint is selected by the
+legacy hard IoU at logit threshold 0 (`p > 0.5`). Extra metrics are diagnostic
+only. They include per-image IoU distribution statistics, recall, Dice, soft
+IoU/Dice, full BCE, Brier score, 15-bin pixel-probability ECE, FP/FN statistics,
+Boundary IoU with a 2%-of-image-diagonal boundary width, and an
+IoU-vs-probability-threshold curve. Training also records the realized
+real/synthetic, occluder-source, texture-replacement, and mask-asset sampling
+mixture for each epoch.
+
+The canonical scientific baseline keeps the existing modernized TF32 policy,
+while seeding Python/NumPy/PyTorch/CUDA RNGs, disabling persistent DataLoader
+workers, and using deterministic CUDA algorithm selection.
