@@ -140,14 +140,15 @@ class Epoch:
                 y = y.to(self.device, non_blocking=True)
                 model_x = self.input_preprocess(x) if self.input_preprocess is not None else x
                 loss, y_pred = self.batch_update(model_x, y)
+                batch_size = int(y.shape[0])
                 loss_value = loss.item()
-                loss_meter.add(loss_value)
+                loss_meter.add(loss_value, n=batch_size)
                 loss_logs = {self.loss.__name__: loss_meter.mean}
                 logs.update(loss_logs)
 
                 for metric_fn in self.metrics:
                     metric_value = metric_fn(y_pred, y).item()
-                    metric_meters[metric_fn.__name__].add(metric_value)
+                    metric_meters[metric_fn.__name__].add(metric_value, n=batch_size)
 
                 metric_logs = {k: v.mean for k, v in metric_meters.items()}
                 logs.update(metric_logs)

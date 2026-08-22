@@ -6,10 +6,29 @@ import cv2
 
 class RandomAffine(object):
     def __init__(self, scale, angle, flip=0.5, translate=0.1):
+        if not 0.0 <= translate <= 1.0:
+            raise ValueError('translate must be a non-negative image fraction in [0, 1]')
         self.scale = scale
         self.angle = angle / 180 * math.pi
         self.flip = flip  # probability of left-right flip
         self.translate = translate
+
+    def _sample_translation(self, height, width):
+        """Sample independent symmetric x/y translations for affine_grid.
+
+        ``translate`` follows torchvision-style semantics: it is the maximum
+        displacement as a fraction of image width/height. ``affine_grid``
+        expects translation in normalized coordinates, hence the conversion
+        from sampled pixel displacement below.
+        """
+        if self.translate == 0.0:
+            return 0.0, 0.0
+
+        dx_pixels = (2.0 * torch.rand(1).item() - 1.0) * self.translate * width
+        dy_pixels = (2.0 * torch.rand(1).item() - 1.0) * self.translate * height
+        tx = 0.0 if width <= 1 else 2.0 * dx_pixels / (width - 1)
+        ty = 0.0 if height <= 1 else 2.0 * dy_pixels / (height - 1)
+        return tx, ty
 
     def __call__(self, data):
         # data = {'img': img, 'uv': uv, 'mat_inv': mat_inverse, 'mask': mask}
@@ -25,11 +44,11 @@ class RandomAffine(object):
         sin = torch.sin(angle).item()
 
         s = (1 + 2 * self.scale * torch.rand(1) - self.scale).item()
-        t = self.translate * torch.rand(1)
-        M = torch.Tensor([
-            [s * cos, s * sin, t],
-            [-s * sin, s * cos, t]
-        ])
+        tx, ty = self._sample_translation(h, w)
+        M = torch.tensor([
+            [s * cos, s * sin, tx],
+            [-s * sin, s * cos, ty]
+        ], dtype=img.dtype)
 
         if flip:
             M[0, 0] *= -1

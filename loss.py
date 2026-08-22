@@ -81,16 +81,21 @@ class IoU(nn.Module):
     def __init__(self, threshold=0.0, eps=1e-7):
         super().__init__()
         self.threshold = threshold
-        self.eps = 1e-7
+        self.eps = eps
 
     def iou(self, pr, gt):
+        if pr.shape != gt.shape or pr.ndim < 2:
+            raise ValueError(f'expected matching batched tensors, got {pr.shape} and {gt.shape}')
         pr = (pr > self.threshold).type(pr.dtype)
-        intersection = torch.sum(gt * pr) + self.eps
-        union = torch.sum(gt) + torch.sum(pr) - intersection + self.eps
-        return intersection / union
+        reduce_dims = tuple(range(1, pr.ndim))
+        intersection = torch.sum(gt * pr, dim=reduce_dims)
+        union = torch.sum(gt, dim=reduce_dims) + torch.sum(pr, dim=reduce_dims) - intersection
+        score = intersection / union.clamp_min(self.eps)
+        return score.mean()
 
     def forward(self, pr, gt):
         return self.iou(pr, gt)
+
 
 class Precision(nn.Module):
     __name__ = 'Precision_score'
@@ -98,13 +103,17 @@ class Precision(nn.Module):
     def __init__(self, threshold=0.0, eps=1e-7):
         super().__init__()
         self.threshold = threshold
-        self.eps = 1e-7
+        self.eps = eps
 
     def iou(self, pr, gt):
+        if pr.shape != gt.shape or pr.ndim < 2:
+            raise ValueError(f'expected matching batched tensors, got {pr.shape} and {gt.shape}')
         pr = (pr > self.threshold).type(pr.dtype)
-        intersection = torch.sum(gt * pr) + self.eps
-        union = torch.sum(pr)+ self.eps
-        return intersection / union
+        reduce_dims = tuple(range(1, pr.ndim))
+        true_positive = torch.sum(gt * pr, dim=reduce_dims)
+        predicted_positive = torch.sum(pr, dim=reduce_dims)
+        score = true_positive / predicted_positive.clamp_min(self.eps)
+        return score.mean()
 
     def forward(self, pr, gt):
         return self.iou(pr, gt)

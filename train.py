@@ -182,6 +182,9 @@ def main():
         'primary_metric_logit_threshold': LEGACY_IOU_THRESHOLD_LOGIT,
         'checkpoint_selection': 'max legacy validation IoU',
         'loss': 'legacy OHEM-BCE',
+        'random_affine_translation': 'independent symmetric +/- image fraction per axis',
+        'metric_aggregation': 'per-image macro metric, sample-weighted across epoch',
+        'loss_epoch_aggregation': 'batch loss, sample-weighted across epoch',
         'ohem_thresh': 0.7,
         'ohem_n_min': 256 ** 2 - 1,
         'diagnostics': {
