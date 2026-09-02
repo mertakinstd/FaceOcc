@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: >-
+  If this modernized implementation contributes to published work, please
+  consider citing the software release in addition to the original FaceOcc
+  paper.
+title: "FaceOcc: Modernized Implementation"
+type: software
+authors:
+  - family-names: "Akın"
+    given-names: "Mert"
+    orcid: "https://orcid.org/0009-0005-3303-3401"
+repository-code: "https://github.com/mertakinstd/FaceOcc"
+version: "1.0.0"
+date-released: "2026-09-02"
+doi: "10.5281/zenodo.22261117"
+license: MIT
+keywords:
+  - face extraction
+  - face occlusion
+  - semantic segmentation
+  - FaceOcc
+  - PyTorch
+abstract: >-
+  A modernized and reproducible derivative of the original FaceOcc
+  implementation, preserving the canonical U-Net/ResNet18 and
+  global OHEM-BCE modeling contract while updating runtime support,
+  reproducibility, data preparation, checkpoint serialization, diagnostics,
+  and corrected implementation semantics.

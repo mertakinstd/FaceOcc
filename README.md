@@ -1,102 +1,212 @@
-# FaceExtraction
+# FaceOcc
 
-[FaceOcc: A Diverse, High-quality Face Occlusion Dataset for Human Face Extraction](https://arxiv.org/pdf/2201.08425.pdf)
+**A modernized, reproducible FaceOcc implementation.**
 
-Our paper is accepted by [TAIMA 2022](http://www.arts-pi.org.tn/TAIMA2020/)
+> [!IMPORTANT]
+> This repository is a derivative modernization of the original **FaceOcc** implementation for **FaceOcc: A Diverse, High-quality Face Occlusion Dataset for Human Face Extraction** by Xiangnan Yin and Liming Chen. The FaceOcc dataset, original method, U-Net/ResNet18 baseline, and global OHEM-BCE training objective originate from the original authors. This repository focuses on maintaining that method on a current software stack with reproducible training, safer artifacts, automated preparation, richer diagnostics, and corrected implementation semantics.
 
-> Occlusions often occur in face images in the wild, troubling face-related tasks such as landmark detection, 3D reconstruction, and face recognition. It is beneficial to extract face regions from unconstrained face images accurately. However, current face segmentation datasets suffer from small data volumes, few occlusion types, low resolution, and imprecise annotation, limiting the performance of data-driven-based algorithms. This paper proposes a novel face occlusion dataset with manually labeled face occlusions from the CelebA-HQ and the internet. The occlusion types cover sunglasses, spectacles, hands, masks, scarfs, microphones, etc. To the best of our knowledge, it is by far the largest and most comprehensive face occlusion dataset. Combining it with the attribute mask in CelebAMask-HQ, we trained a straightforward face segmentation model but obtained SOTA performance, convincingly demonstrating the effectiveness of the proposed dataset. 
+- **Original paper:** [FaceOcc: A Diverse, High-quality Face Occlusion Dataset for Human Face Extraction](https://arxiv.org/abs/2201.08425)
+- **Original repository:** [face3d0725/FaceExtraction](https://github.com/face3d0725/FaceExtraction)
+- **Modernization:** Mert Akın ([@mertakinstd](https://github.com/mertakinstd))
+- **Canonical model weights:** [mertakin/FaceOcc](https://huggingface.co/mertakin/FaceOcc) on Hugging Face
+- **License and attribution:** [LICENSE](LICENSE) · [NOTICE.md](NOTICE.md)
 
-# Setup
+## Scope
 
-The project uses a repo-local Micromamba environment with Python 3.12, PyTorch 2.13/CUDA 13.2, and segmentation-models-pytorch 0.5.0.
+FaceOcc predicts the **visible facial surface** of an occluded face as a binary mask:
+
+- `1` — visible face
+- `0` — background or occluder
+
+The canonical release intentionally keeps the original model family and training objective rather than replacing them with a new face-segmentation method. Modernization work is limited to the execution, preparation, reproducibility, diagnostics, artifact, and implementation layers required to run the FaceOcc baseline reliably on a current CUDA/PyTorch stack.
+
+## Canonical configuration
+
+| Component | Release configuration |
+| --- | --- |
+| Architecture | U-Net |
+| Encoder | ResNet18, ImageNet pretrained |
+| Input | RGB, `256 × 256` |
+| Input normalization | ImageNet mean/std after augmentation |
+| Output | One-channel visible-face logits |
+| Objective | Global OHEM-BCE |
+| Optimizer | Adam, initial LR `1e-4` |
+| Precision | IEEE FP32 |
+| Default seed | `42` |
+| Checkpoint selection | Maximum COFW face IoU at `p = 0.5` |
+| Checkpoint format | `safetensors` |
+
+## Model weights
+
+The canonical FaceOcc `v1.0.0` checkpoint is available on [Hugging Face](https://huggingface.co/mertakin/FaceOcc). The model repository provides the `safetensors` weights together with the inference configuration, canonical training provenance, and model card.
+
+## What is modernized
+
+The release preserves the canonical FaceOcc modeling contract while updating the surrounding implementation:
+
+- Python 3.12 and a repo-local Micromamba environment.
+- PyTorch 2.13 / CUDA 13.2 and `segmentation-models-pytorch` 0.5.0.
+- CUDA-only training with explicit IEEE FP32 behavior; no silent CPU fallback.
+- Seeded Python, NumPy, PyTorch, CUDA, DataLoader, and augmentation RNGs.
+- ImageNet normalization for the pretrained ResNet18 input path.
+- Safe `safetensors` checkpoint serialization.
+- Automated FaceOcc/CelebAMask-HQ acquisition and validation through `setup.sh`.
+- Reproducible 3DDFA_V2-based landmark generation and alignment through `prepare.sh`, with pinned revision and artifact hashes.
+- A single canonical training entrypoint through `train.sh`.
+- Extended validation diagnostics including IoU distribution statistics, Dice, precision/recall, Boundary IoU, calibration diagnostics, FP/FN statistics, and threshold sweeps.
+- Corrected legacy augmentation translation semantics: independent, symmetric per-axis affine translation.
+- Corrected metric aggregation semantics: per-image macro metrics with sample-weighted epoch aggregation.
+
+## Installation and data preparation
+
+### Requirements
+
+- Linux x86_64
+- NVIDIA GPU and compatible NVIDIA driver
+- `curl`, `git`, `tar`, `unzip`, `find`, `stat`, and `sha256sum`
+
+Training is intentionally CUDA-only.
+
+### 1. Configure dataset access
 
 ```bash
 cp .env.example .env
-# Set the dataset URLs and accept the CelebAMask-HQ license in .env.
+```
+
+Edit `.env` and set the required download locations. `CelebAMask-HQ` is a third-party dataset; set:
+
+```text
+CELEBAMASK_LICENSE_ACCEPTED=1
+```
+
+only after reviewing and accepting its terms.
+
+### 2. Create the environment and acquire raw data
+
+```bash
 ./setup.sh
+```
+
+`setup.sh` installs the repo-local Micromamba environment, installs the pinned Python/CUDA stack, validates downloaded archives, and performs dataset preflight checks.
+
+### 3. Reproduce the aligned training data
+
+```bash
 ./prepare.sh
 ```
 
-`setup.sh` creates the environment and downloads the raw FaceOcc and CelebAMask-HQ datasets. `prepare.sh` reproduces the original 3DDFA_V2-based face alignment and writes the training-ready CelebA-HQ images and masks.
+`prepare.sh` fetches the pinned `3DDFA_V2` revision, verifies model artifacts by size and SHA-256, generates facial landmarks, reproduces the FaceOcc alignment path, and verifies the resulting image/mask pairs.
 
-# Training
+Prepared data are generated locally and are intentionally excluded from Git.
 
-Training requires CUDA. The original FaceOcc recipe is retained with a modern SMP U-Net/ResNet18 implementation and safetensors checkpoints.
+## Training
+
+Run the canonical configuration with:
 
 ```bash
 ./train.sh
 ```
 
-# Dataset 
-[FaceOcc](https://drive.google.com/drive/folders/1K_V0AwhLT_TfHUny9sMA5PZ9KmEQSy05?usp=sharing)
+The default seed is `42`. It can be changed explicitly:
 
-# Pretrained Model
-[Pretrained Model](https://drive.google.com/file/d/11cOc1KJnkR6hNp1l0vnMmCDxGTOCtsEb/view?usp=sharing)
+```bash
+FACEOCC_SEED=123 ./train.sh
+```
 
-# Results
-Face masks are shown in blue. From top to bottom are input images, predicted masks, and the ground truth: 
-![From top to the bottom: input images, predicted masks, ground truth](results/show_1.png)
+A run records:
 
+- `run_config.json` — protocol, environment, device, and reproducibility metadata
+- `history.csv` — epoch-level training/validation metrics
+- `summary.json` — selected checkpoint and run summary
+- `checkpoints/*.safetensors` — model checkpoints
 
-# Related Works
-* **CelebA** dataset:<br/>
-Ziwei Liu, Ping Luo, Xiaogang Wang and Xiaoou Tang, "Deep Learning Face Attributes in the Wild", in IEEE International Conference on Computer Vision (ICCV), 2015 
-* **CelebA-HQ** was collected from CelebA and further post-processed by the following paper :<br/>
-Karras et. al, "Progressive Growing of GANs for Improved Quality, Stability, and Variation", in Internation Conference on Reoresentation Learning (ICLR), 2018
-* **CelebAMask-HQ** dataset:<br />
-Lee, Cheng-Han and Liu, Ziwei and Wu, Lingyun and Luo, Ping, "Maskgan: Towards diverse and interactive facial image manipulation", in IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2020
+The best checkpoint is selected by COFW visible-face IoU at logit threshold `0`, equivalent to probability threshold `0.5`.
 
+## Canonical reference run
 
-# License
+The following values are provided as a **release reference**, not as a comparison against alternative methods. They allow users to check whether a reproduced canonical run is in the expected regime. The reference run was trained on an **NVIDIA GeForce RTX 3060 12 GB** GPU. Runtime measurements are hardware-dependent.
 
-This dataset as well as the pretrained face extraction model is licensed under the MIT License. You are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the data, as well as to permit persons to whom the data is furnished to do so, subject to the following conditions:
+![Canonical COFW validation curve](docs/assets/canonical_cofw_iou.svg)
 
-- The above copyright notice and this permission notice shall be included in all copies or substantial portions of the data.
-- The data is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the data or the use or other dealings in the data.
+| Metric | Reference value |
+| --- | ---: |
+| Best epoch | **24 / 30** |
+| COFW face IoU @ `p = 0.5` | **0.936523** |
+| Dice | **0.966749** |
+| Precision | **0.948656** |
+| Recall | **0.986324** |
+| Boundary IoU | **0.682287** |
+| IoU p10 / median / p90 | **0.893731 / 0.945921 / 0.971353** |
+| Best optimizer step | **41,688** |
+| Peak training VRAM | **1607 MiB** |
+| Training compute to selected epoch | **2 h 05 m 46 s** |
+| Wall time to selected validation | **2 h 12 m 24 s** |
+| Full 30-epoch wall time | **2 h 38 m 11 s** |
 
-For more details about the MIT License, please see [the full text](https://opensource.org/licenses/MIT).
+The canonical checkpoint criterion remains IoU at `p = 0.5`. A probability-threshold sweep is recorded only as a diagnostic; in this reference run its maximum was `0.944040` at `p = 0.70`.
 
+Machine-readable reference values and the compact epoch history used for the figure are included in [`docs/reference/`](docs/reference/).
 
+## Evaluation
 
-# Citation
+`evaluation_cofw.py` loads the best `safetensors` checkpoint and evaluates the FaceOcc COFW test masks using the canonical input preprocessing path.
 
-If you use our dataset, please cite our following works: 
+```bash
+python evaluation_cofw.py
+```
 
->Xiangnan YIN, Liming Chen, “FaceOcc: A Diverse, High-quality Face Occlusion Dataset for Human Face Extraction”, Traitement et Analyse de l’Information Méthodes et Applications (TAIMA’2022), 28 May-02 June 2022, Hammamet, Tunisia, ArXiv : 2201.08425. HAL : hal-03540753.
+COFW is used by the canonical training loop for checkpoint/epoch selection. Additional external benchmarks should therefore be reported separately from the COFW checkpoint-selection metric.
 
->Xiangnan YIN, Di Huang, Zehua Fu, Yunhong Wang, Liming Chen, Segmentation-Reconstruction-Guided Facial Image De-occlusion, 17th IEEE Intl. Conference on Automatic Face and Gesture Recognition 2023 (FG’2023), January 5-8, 2023, Hawaiii, USA. Find the video presentation [here](https://youtu.be/meQHBwWM2i0).
+## Reproducibility notes
 
->Xiangnan YIN, Di Huang, Zehua Fu, Yunhong Wang, Liming Chen, Weakly Supervised Photo-Realistic Texture Generation for 3D Face Reconstruction, 17th IEEE Intl. Conference on Automatic Face and Gesture Recognition 2023 (FG’2023), January 5-8, 2023, Hawaiii, USA. Find the video presentation [here](https://youtu.be/PPdLKDI-xyk).
+- Stochastic augmentation remains stochastic across samples and epochs, but the same seed reproduces the same RNG/DataLoader stream under the supported environment.
+- Persistent DataLoader workers are intentionally disabled.
+- Eligible CUDA FP32 matmul and convolution paths are configured for IEEE FP32 rather than TF32.
+- Images are converted to `[0,1]`, augmented, then normalized with ImageNet mean `[0.485, 0.456, 0.406]` and standard deviation `[0.229, 0.224, 0.225]` immediately before model forward.
+- Masks are never normalized.
+- The canonical primary metric is visible-face IoU at `p = 0.5`; additional metrics are diagnostics.
 
->Xiangnan Yin, Di Huang, Liming Chen, “Non-Deterministic Face Mask Removal Based on 3D Priors”, 2022 IEEE International Conference on Image Processing (ICIP), Bordeaux, France, 16-19 October 2022. Find the video presentation [here](https://youtu.be/pspJsAq8rww). 
+## Project layout
 
+```text
+.
+├── Dataset/              # dataset loaders and augmentations
+├── face_align/           # alignment/preparation utilities
+├── diagnostics.py        # validation diagnostics
+├── faceocc_runtime.py    # model/runtime and reproducibility policy
+├── loss.py               # canonical losses and metrics
+├── train.py              # canonical training program
+├── train_utils.py        # train/validation epoch loops
+├── evaluation_cofw.py    # COFW evaluation
+├── setup.sh              # environment + raw-data setup
+├── prepare.sh            # reproducible alignment/preparation
+└── train.sh              # canonical training entrypoint
+```
 
+## Attribution and citation
 
+If you use the FaceOcc dataset, model design, or original method, cite the original FaceOcc work:
 
-## Scientific layer 1: reproducibility and diagnostics
+```bibtex
+@misc{yin2022faceocc,
+  title   = {FaceOcc: A Diverse, High-quality Face Occlusion Dataset for Human Face Extraction},
+  author  = {Yin, Xiangnan and Chen, Liming},
+  year    = {2022},
+  eprint  = {2201.08425},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.CV}
+}
+```
 
-The modernized baseline now supports a seeded, deterministic stochastic training
-protocol. Augmentations remain random across samples/epochs, but the same seed
-replays the same DataLoader/RNG stream. DataLoader workers are intentionally
-non-persistent in this first scientific baseline.
+Please also retain the upstream attribution required by the MIT License. See [`NOTICE.md`](NOTICE.md) for the distinction between the original FaceOcc work and the modernization in this repository.
 
-The legacy FaceOcc training objective and checkpoint-selection metric are
-unchanged: OHEM-BCE is optimized and the best checkpoint is selected by the
-legacy hard IoU at logit threshold 0 (`p > 0.5`). Extra metrics are diagnostic
-only. They include per-image IoU distribution statistics, recall, Dice, soft
-IoU/Dice, full BCE, Brier score, 15-bin pixel-probability ECE, FP/FN statistics,
-Boundary IoU with a 2%-of-image-diagonal boundary width, and an
-IoU-vs-probability-threshold curve. Training also records the realized
-real/synthetic, occluder-source, texture-replacement, and mask-asset sampling
-mixture for each epoch.
+If this **modernized implementation** contributes to published work, please also consider citing the software release in addition to the original FaceOcc paper. Citation metadata are provided in [`CITATION.cff`](CITATION.cff). The archived `v1.0.0` software release is identified by DOI [`10.5281/zenodo.22261117`](https://doi.org/10.5281/zenodo.22261117).
 
-The canonical scientific baseline uses IEEE FP32 for eligible CUDA matmul and
-convolution compute. This policy was promoted after the controlled TF32-vs-FP32
-ablation; TF32 remains an optional experiment/performance mode rather than the
-canonical scientific setting. The canonical ResNet18 input path also uses
-ImageNet normalization after augmentation and immediately before model forward:
-RGB tensors in `[0,1]` are normalized with mean `[0.485, 0.456, 0.406]` and
-standard deviation `[0.229, 0.224, 0.225]`. This policy was promoted after the
-controlled legacy-vs-ImageNet normalization ablation. Python/NumPy/PyTorch/CUDA
-RNGs are seeded, persistent DataLoader workers are disabled, and deterministic
-CUDA algorithm selection is enabled.
+> [!NOTE]
+> Citing this software implementation does not replace citation of the original FaceOcc work. The scientific method and dataset should continue to be credited to the original authors.
+
+## License
+
+The software is distributed under the MIT License. The upstream copyright notice is preserved in [`LICENSE`](LICENSE); modernization contributions are identified in [`NOTICE.md`](NOTICE.md) and are distributed under the same license.
+
+Third-party datasets and artifacts retain their own licenses and terms. The repository MIT License does **not** alter or supersede the terms under which FaceOcc, CelebAMask-HQ, 3DDFA_V2, or other separately distributed resources are provided.

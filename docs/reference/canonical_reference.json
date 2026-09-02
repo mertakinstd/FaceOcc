@@ -1,0 +1,39 @@
+{
+  "configuration": {
+    "architecture": "U-Net",
+    "encoder": "ResNet18 (ImageNet pretrained)",
+    "objective": "global OHEM-BCE",
+    "input_size": [
+      256,
+      256
+    ],
+    "input_normalization": "ImageNet",
+    "precision": "IEEE FP32",
+    "seed": 42,
+    "checkpoint_selection": "maximum COFW face IoU at p=0.5"
+  },
+  "reference_result": {
+    "best_epoch": 24,
+    "best_optimizer_steps": 41688,
+    "cofw_face_iou_p0_5": 0.9365229641199112,
+    "cofw_dice": 0.9667492371299602,
+    "cofw_precision": 0.9486558981623978,
+    "cofw_recall": 0.986323683792024,
+    "cofw_boundary_iou": 0.6822874439677954,
+    "cofw_iou_p10": 0.8937306018227091,
+    "cofw_iou_median": 0.9459206621039866,
+    "cofw_iou_p90": 0.971352559291355,
+    "diagnostic_best_probability_threshold": 0.7,
+    "diagnostic_iou_at_best_probability_threshold": 0.9440404805844486,
+    "peak_training_vram_mib": 1607.43359375,
+    "training_seconds_to_best_epoch": 7545.5741849349,
+    "wall_seconds_to_best_validation": 7944.461749002978,
+    "total_training_seconds_30_epochs": 9034.002372613933,
+    "total_wall_seconds_30_epochs": 9490.94753486698
+  },
+  "notes": [
+    "Runtime measurements are hardware-dependent.",
+    "The primary checkpoint-selection metric is COFW face IoU at probability threshold 0.5.",
+    "The threshold sweep is diagnostic and is not used for checkpoint selection."
+  ]
+}
